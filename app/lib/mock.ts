@@ -597,15 +597,25 @@ export function saveAssigneeLetter(
   if (!c.assigneeUserId || c.assigneeUserId !== authorUserId) {
     throw new Error("Only the assigned user can save the letter");
   }
+
+  // Preserve submittedAt if the letter was already submitted
+  const prevSubmittedAt = c.assigneeLetter?.submittedAt;
+
   const letter: AssigneeLetter = {
     body: body.trim(),
     authorUserId,
     updatedAt: nowISO(),
-    submittedAt: undefined,
+    submittedAt: prevSubmittedAt, // keep submission marker if it exists
   };
   c.assigneeLetter = letter;
-  c.status = "IN_PROGRESS";
-  c.returnInfo = null; // clear any previous return banner
+
+  // If the complaint is already awaiting principal review, DO NOT regress status.
+  // Otherwise, saving means "still working" → IN_PROGRESS and clear return banner.
+  if (c.status !== "AWAITING_PRINCIPAL_REVIEW") {
+    c.status = "IN_PROGRESS";
+    c.returnInfo = null;
+  }
+
   c.updatedAt = nowISO();
   persist();
   return c;
@@ -671,6 +681,7 @@ export function principalReturnForRedo(
   };
   c.returnInfo = ret;
 
+  // Requirement: returning sets status back to IN_PROGRESS
   c.status = "IN_PROGRESS";
   c.principalReview = undefined;
   c.updatedAt = ts;
