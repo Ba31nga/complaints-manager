@@ -21,6 +21,10 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "next-auth": "^4.24.11"
+    "googleapis": "^164.1.0",
+    "next": "^16.0.1",
+    "next-auth": "^4.24.12",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
   }
 }
