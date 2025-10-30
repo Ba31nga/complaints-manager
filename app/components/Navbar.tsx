@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import ThemeToggle from "@/app/components/ThemeToggle";
+import { signOut } from "next-auth/react"; // ✅ add this
 
 type Role = "EMPLOYEE" | "MANAGER" | "ADMIN";
 
@@ -84,9 +85,16 @@ export default function Navbar() {
             ))}
           </div>
 
-          {/* Right controls */}
+          {/* Right controls (desktop) */}
           <div className="hidden md:flex items-center gap-2 px-3">
             <ThemeToggle />
+            {/* ✅ Logout button */}
+            <button
+              onClick={() => signOut({ callbackUrl: "/login" })}
+              className="rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-sm hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-800 dark:hover:bg-neutral-700"
+            >
+              התנתקות
+            </button>
           </div>
 
           {/* Mobile menu button */}
@@ -121,8 +129,18 @@ export default function Navbar() {
                   {l.label}
                 </Link>
               ))}
-              <div className="px-3 pt-1">
+              <div className="px-3 pt-1 flex items-center justify-between">
                 <ThemeToggle />
+                {/* ✅ Logout button (mobile) */}
+                <button
+                  onClick={() => {
+                    setOpen(false);
+                    signOut({ callbackUrl: "/login" });
+                  }}
+                  className="rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-sm hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-800 dark:hover:bg-neutral-700"
+                >
+                  התנתקות
+                </button>
               </div>
             </div>
           </div>
