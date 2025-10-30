@@ -4,32 +4,63 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
+import type { Complaint, Role, User, Department } from "@/app/lib/types";
 
-import type { Complaint, Role, User } from "@/app/lib/types";
-import {
-  // data & getters
-  users,
-  departments,
-  getComplaint,
-  assignableUsersForDept,
-  // mutators
-  assignComplaint,
-  changeDepartment,
-  saveAssigneeLetter,
-  submitForPrincipalReview,
-  principalReturnForRedo,
-  principalApproveAndClose,
-} from "@/app/lib/mock";
+/* ─────────────────────────── DB Adapters ─────────────────────────── */
+async function api<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, { cache: "no-store", ...init });
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j?.error) msg = j.error;
+    } catch {
+      /* noop */
+    }
+    throw new Error(msg);
+  }
+  return res.json() as Promise<T>;
+}
+
+async function fetchComplaint(id: string): Promise<Complaint> {
+  const { data } = await api<{ data: Complaint }>(`/api/complaints/${id}`);
+  return data;
+}
+async function fetchUsers(): Promise<User[]> {
+  const { data } = await api<{ data: User[] }>(`/api/users`);
+  return data;
+}
+async function fetchDepartments(): Promise<Department[]> {
+  const { data } = await api<{ data: Department[] }>(`/api/departments`);
+  return data;
+}
+
+async function patchAssign(id: string, userId: string | null) {
+  await api<unknown>(`/api/complaints/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ assigneeUserId: userId }),
+  });
+}
+async function patchChangeDepartment(id: string, departmentId: string) {
+  await api<unknown>(`/api/complaints/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ departmentId }),
+  });
+}
 
 /* ─────────────────────────── Viewer (from localStorage) ─────────────────────────── */
 type Viewer = { role: Role; userId: string; departmentId?: string };
 
-function readViewer(): Viewer {
+function readViewer(users: User[] = []): Viewer {
   const role = (localStorage.getItem("role") as Role | null) ?? "EMPLOYEE";
   const userId = localStorage.getItem("userId") ?? "u2";
   let departmentId = localStorage.getItem("departmentId") ?? "";
-  const u = users.find((x) => x.id === userId);
-  if (u && !departmentId) departmentId = u.departmentId;
+  if (!departmentId) {
+    const u = users.find((x) => x.id === userId);
+    if (u) departmentId = u.departmentId;
+  }
   return { role, userId, departmentId };
 }
 
@@ -42,24 +73,18 @@ const statusLabel: Record<Complaint["status"], string> = {
   CLOSED: "סגור",
 };
 
-// ADMIN or PRINCIPAL can change department
 function canChangeDepartment(viewer: Viewer) {
   return viewer.role === "ADMIN" || viewer.role === "PRINCIPAL";
 }
-
-// ADMIN/PRINCIPAL can assign anywhere; MANAGER can assign only in their dept
 function canAssign(viewer: Viewer, effectiveDeptId: string) {
   if (viewer.role === "ADMIN" || viewer.role === "PRINCIPAL") return true;
   if (viewer.role === "MANAGER" && viewer.departmentId === effectiveDeptId)
     return true;
   return false;
 }
-
-// Whoever is assigned can write (manager/admin/principal if assigned to self)
 function canAssigneeWrite(viewer: Viewer, assigneeId?: string | null) {
   return !!assigneeId && viewer.userId === assigneeId;
 }
-
 function canPrincipalAct(viewer: Viewer) {
   return viewer.role === "PRINCIPAL" || viewer.role === "ADMIN";
 }
@@ -68,40 +93,98 @@ function canPrincipalAct(viewer: Viewer) {
 export default function ComplaintDetailPage() {
   const { id } = useParams<{ id: string }>();
 
-  // bump this to re-read the DB (mock arrays) after mutations
-  const [rev, setRev] = useState(0);
-
-  const complaint = useMemo(() => getComplaint(id), [id, rev]);
+  const [users, setUsers] = useState<User[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [complaint, setComplaint] = useState<Complaint | null>(null);
   const [viewer, setViewer] = useState<Viewer | null>(null);
 
-  // form state
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+
+  // form state (להמשך חיווט אל messagesJSON)
   const [employeeDraft, setEmployeeDraft] = useState("");
   const [principalDraft, setPrincipalDraft] = useState("");
   const [principalJust, setPrincipalJust] = useState<boolean | null>(null);
   const [returnReason, setReturnReason] = useState("");
 
+  // Load DB
   useEffect(() => {
-    // viewer from localStorage
-    setViewer(readViewer());
-    // keep viewer in sync if user switches role/user in another tab
+    let alive = true;
+    (async () => {
+      try {
+        setLoading(true);
+        setErr(null);
+        const [u, d, c] = await Promise.all([
+          fetchUsers(),
+          fetchDepartments(),
+          fetchComplaint(id),
+        ]);
+        if (!alive) return;
+        setUsers(u);
+        setDepartments(d);
+        setComplaint(c);
+        setViewer(readViewer(u));
+        // init editors (when we add messages support)
+        setEmployeeDraft(c.assigneeLetter?.body ?? "");
+        setPrincipalDraft("");
+        setPrincipalJust(null);
+        setReturnReason("");
+      } catch (e: unknown) {
+        if (!alive) return;
+        const message = e instanceof Error ? e.message : "Failed to load";
+        setErr(message);
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [id]);
+
+  // Keep viewer in sync if role/user/departmentId changed in another tab
+  useEffect(() => {
     const onStorage = (e: StorageEvent) => {
       if (["role", "userId", "departmentId"].includes(e.key ?? "")) {
-        setViewer(readViewer());
+        setViewer(readViewer(users));
       }
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
-  }, []);
+  }, [users]);
 
-  // initialize editor values from DB each time complaint changes
-  useEffect(() => {
-    if (!complaint) return;
-    setEmployeeDraft(complaint.assigneeLetter?.body ?? "");
-    setPrincipalDraft(""); // principal writes fresh summary per review
-    setPrincipalJust(null);
-    setReturnReason(""); // input for new return reason (banner shows from DB if exists)
-  }, [complaint?.id, complaint?.status, rev]);
+  // assignable users per dept
+  const assignableUsersForDept = useMemo(() => {
+    const map = new Map<string, User[]>();
+    for (const d of departments) {
+      const inDept = users.filter((u) => u.departmentId === d.id);
+      const extra =
+        d.managerUserId && !inDept.some((u) => u.id === d.managerUserId)
+          ? users.filter((u) => u.id === d.managerUserId)
+          : [];
+      map.set(d.id, [...inDept, ...extra]);
+    }
+    return (deptId: string) => map.get(deptId) ?? [];
+  }, [users, departments]);
 
+  if (loading) {
+    return (
+      <div className="p-4" dir="rtl">
+        <div className="rounded-xl border bg-white p-8 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
+          טוען נתונים…
+        </div>
+      </div>
+    );
+  }
+  if (err) {
+    return (
+      <div className="p-4" dir="rtl">
+        <div className="rounded-xl border bg-red-100 p-8 text-red-700 shadow-sm dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-200">
+          שגיאה בטעינת הנתונים: {err}
+        </div>
+      </div>
+    );
+  }
   if (!complaint || !viewer) {
     return (
       <div className="p-4" dir="rtl">
@@ -110,15 +193,17 @@ export default function ComplaintDetailPage() {
           <div className="text-sm text-neutral-600 dark:text-neutral-400 mb-4">
             ייתכן שהקישור שגוי או שהפנייה הועברה/נמחקה.
           </div>
+          <Link className="text-blue-600 hover:underline" href="/">
+            ← חזרה לכל הפניות
+          </Link>
         </div>
       </div>
     );
   }
 
-  // Effective values are always the DB values
+  // Effective values (DB)
   const effectiveDeptId = complaint.departmentId;
   const effectiveAssigneeId = complaint.assigneeUserId ?? null;
-
   const dept = departments.find((d) => d.id === effectiveDeptId) ?? null;
   const assignee: User | null = effectiveAssigneeId
     ? users.find((u) => u.id === effectiveAssigneeId) ?? null
@@ -126,7 +211,7 @@ export default function ComplaintDetailPage() {
 
   const displayStatus = complaint.status;
 
-  /* ───── Precomputed booleans ───── */
+  /* ───── Permissions ───── */
   const isAssigned = !!effectiveAssigneeId;
   const canAssignHere = canAssign(viewer, effectiveDeptId);
   const canChangeDeptHere = canChangeDepartment(viewer);
@@ -142,7 +227,6 @@ export default function ComplaintDetailPage() {
     !!complaint.assigneeLetter?.body &&
     complaint.assigneeLetter.body.trim().length > 0;
 
-  // principal may respond/return only if there is a letter and status is AWAITING_PRINCIPAL_REVIEW
   const canPrincipalRespond =
     canPrincipalHere && isAwaitingPrincipal && hasEmployeeLetter;
 
@@ -156,63 +240,51 @@ export default function ComplaintDetailPage() {
     ? "הפנייה נסגרה."
     : "";
 
-  /* ─────────────────────────── Actions (DB-backed) ─────────────────────────── */
-  const rerender = () => setRev((x) => x + 1);
+  /* ─────────────────────────── Actions (DB) ─────────────────────────── */
 
-  // ADMIN / PRINCIPAL: change department
-  const onChangeDept = (deptId: string) => {
+  const refetchComplaint = async () => {
+    const c = await fetchComplaint(complaint.id);
+    setComplaint(c);
+  };
+
+  const onChangeDept = async (deptId: string) => {
     if (!(canChangeDeptHere && !isClosed)) return;
-    changeDepartment(complaint.id, deptId, { clearAssigneeIfNotInDept: true });
-    rerender();
+    await patchChangeDepartment(complaint.id, deptId);
+    await refetchComplaint();
   };
 
-  // ADMIN / PRINCIPAL / MANAGER-of-dept: assign assignee (employee or manager)
-  const onChangeAssignee = (userId: string) => {
+  const onChangeAssignee = async (userId: string) => {
     if (!(canAssignHere && !isClosed)) return;
-    assignComplaint(complaint.id, userId || null);
-    rerender();
+    await patchAssign(complaint.id, userId || null);
+    await refetchComplaint();
   };
 
-  // ASSIGNEE: save letter / submit to principal
-  const onSaveAssigneeLetter = () => {
+  // TODOs (דורש הרחבת סכמת הגיליון/קידוד ב-messagesJSON)
+  const onSaveAssigneeLetter = async () => {
     if (!canWriteHere || !isAssigned || isClosed) return;
     const body = employeeDraft.trim();
     if (!body) return;
-    saveAssigneeLetter(complaint.id, viewer.userId, body);
-    rerender();
+    alert("שמירת מכתב דורשת הרחבת הסכמה (messagesJSON/עמודות חדשות).");
   };
 
-  const onSubmitToPrincipal = () => {
+  const onSubmitToPrincipal = async () => {
     if (!canWriteHere || !isAssigned || isAwaitingPrincipal || isClosed) return;
     const body = (employeeDraft || "").trim();
     if (!body) return;
-    // ensure latest draft saved before submit
-    saveAssigneeLetter(complaint.id, viewer.userId, body);
-    submitForPrincipalReview(complaint.id, viewer.userId);
-    rerender();
+    alert("העברה לאישור דורשת הרחבת הסכמה (messagesJSON/עמודות חדשות).");
   };
 
-  // PRINCIPAL: close with justified flag + summary (only if an employee letter exists)
-  const onPrincipalClose = () => {
+  const onPrincipalClose = async () => {
     if (!canPrincipalRespond) return;
     if (principalJust === null || !principalDraft.trim()) return;
-    principalApproveAndClose(
-      complaint.id,
-      viewer.userId,
-      principalJust,
-      principalDraft.trim()
-    );
-    rerender();
+    alert("סגירה דורשת הרחבת הסכמה (messagesJSON/עמודות חדשות).");
   };
 
-  // PRINCIPAL: return to assignee for redo (DB persists reason; only if letter exists)
-  const onPrincipalReturn = () => {
+  const onPrincipalReturn = async () => {
     if (!canPrincipalRespond) return;
     const reason = returnReason.trim();
     if (!reason) return;
-    principalReturnForRedo(complaint.id, viewer.userId, reason);
-    setReturnReason("");
-    rerender();
+    alert("החזרה לעריכה דורשת הרחבת הסכמה (messagesJSON/עמודות חדשות).");
   };
 
   /* ─────────────────────────── UI ─────────────────────────── */
@@ -248,15 +320,15 @@ export default function ComplaintDetailPage() {
         </div>
       </div>
 
-      {/* Stepper (2 steps) */}
+      {/* Stepper */}
       <div className="mb-6">
         <ol className="flex items-center text-[11px] text-neutral-600 dark:text-neutral-400">
           <li
             className={`flex items-center ${
               displayStatus === "ASSIGNED" ||
               displayStatus === "IN_PROGRESS" ||
-              isAwaitingPrincipal ||
-              isClosed
+              displayStatus === "AWAITING_PRINCIPAL_REVIEW" ||
+              displayStatus === "CLOSED"
                 ? "font-semibold text-neutral-900 dark:text-neutral-100"
                 : ""
             }`}
@@ -266,7 +338,8 @@ export default function ComplaintDetailPage() {
           <span className="mx-2 h-px w-10 bg-neutral-300 dark:bg-neutral-700" />
           <li
             className={`flex items-center ${
-              isAwaitingPrincipal || isClosed
+              displayStatus === "AWAITING_PRINCIPAL_REVIEW" ||
+              displayStatus === "CLOSED"
                 ? "font-semibold text-neutral-900 dark:text-neutral-100"
                 : ""
             }`}
@@ -288,23 +361,25 @@ export default function ComplaintDetailPage() {
             </p>
           </section>
 
-          {/* Return notice from DB */}
-          {complaint.returnInfo && isInProgress && (
-            <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm dark:border-amber-900/50 dark:bg-amber-900/20">
-              <div className="font-medium mb-1">
-                הוחזר לעריכה ע&quot;י מנהל/ת בית הספר
+          {/* Return notice (future messagesJSON) */}
+          {complaint.returnInfo &&
+            (displayStatus === "IN_PROGRESS" ||
+              displayStatus === "ASSIGNED") && (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm dark:border-amber-900/50 dark:bg-amber-900/20">
+                <div className="font-medium mb-1">
+                  הוחזר לעריכה ע&quot;י מנהל/ת בית הספר
+                </div>
+                <div className="text-amber-800 dark:text-amber-200 whitespace-pre-wrap">
+                  {complaint.returnInfo.reason}
+                </div>
               </div>
-              <div className="text-amber-800 dark:text-amber-200 whitespace-pre-wrap">
-                {complaint.returnInfo.reason}
-              </div>
-            </div>
-          )}
+            )}
 
           {/* Assignee letter */}
           <section className="rounded-xl border bg-white p-5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
             <div className="mb-2 flex items-center justify-between">
               <h3 className="text-sm font-semibold">מכתב המטפל/ת</h3>
-              {isAwaitingPrincipal && (
+              {displayStatus === "AWAITING_PRINCIPAL_REVIEW" && (
                 <span className="text-[11px] text-neutral-500">
                   הוגש לאישור מנהל/ת בית הספר
                 </span>
@@ -318,7 +393,10 @@ export default function ComplaintDetailPage() {
               value={employeeDraft}
               onChange={(e) => setEmployeeDraft(e.target.value)}
               disabled={
-                !canWriteHere || !isAssigned || isAwaitingPrincipal || isClosed
+                !canWriteHere ||
+                !isAssigned ||
+                displayStatus === "AWAITING_PRINCIPAL_REVIEW" ||
+                isClosed
               }
             />
 
@@ -342,7 +420,7 @@ export default function ComplaintDetailPage() {
                   !canWriteHere ||
                   !isAssigned ||
                   !employeeDraft.trim() ||
-                  isAwaitingPrincipal ||
+                  displayStatus === "AWAITING_PRINCIPAL_REVIEW" ||
                   isClosed
                 }
               >
@@ -357,14 +435,14 @@ export default function ComplaintDetailPage() {
               אישור מנהל/ת בית הספר / החזרה לעריכה
             </h3>
 
-            {/* Only actionable during review AND only if an employee letter exists */}
             <fieldset disabled={!canPrincipalRespond || isClosed}>
-              {!hasEmployeeLetter && isAwaitingPrincipal && (
-                <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[13px] dark:border-amber-900/40 dark:bg-amber-900/20">
-                  אין מכתב מטפל/ת שמור. לא ניתן לאשר או להחזיר עד שהמטפל/ת
-                  יכתוב/תשמור מכתב.
-                </div>
-              )}
+              {!hasEmployeeLetter &&
+                displayStatus === "AWAITING_PRINCIPAL_REVIEW" && (
+                  <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[13px] dark:border-amber-900/40 dark:bg-amber-900/20">
+                    אין מכתב מטפל/ת שמור. לא ניתן לאשר או להחזיר עד שהמטפל/ת
+                    יכתוב/תשמור מכתב.
+                  </div>
+                )}
 
               <div className="mb-3 flex gap-4 text-sm">
                 <label className="inline-flex items-center gap-2">
@@ -393,7 +471,6 @@ export default function ComplaintDetailPage() {
                 onChange={(e) => setPrincipalDraft(e.target.value)}
               />
 
-              {/* Return to assignee */}
               <div className="mt-4 rounded-lg border bg-neutral-50 p-3 text-sm dark:border-neutral-800 dark:bg-neutral-900/40">
                 <div className="mb-2 font-medium">החזרה לעריכה אצל המטפל/ת</div>
                 <textarea
@@ -432,11 +509,10 @@ export default function ComplaintDetailPage() {
 
         {/* Side panel */}
         <aside className="space-y-4 lg:sticky lg:top-6 h-fit">
-          {/* Assignment & Department */}
           <section className="rounded-xl border bg-white p-5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
             <h4 className="mb-3 text-sm font-semibold">שיוך וטיפול</h4>
 
-            {/* Department select (ADMIN + PRINCIPAL) */}
+            {/* Department select */}
             <div className="mb-3">
               <div className="text-xs text-neutral-500">מחלקה מטפלת</div>
               {canChangeDeptHere ? (
@@ -457,7 +533,7 @@ export default function ComplaintDetailPage() {
               )}
             </div>
 
-            {/* Assignee select (ADMIN / PRINCIPAL / MANAGER of dept) */}
+            {/* Assignee select */}
             <div>
               <div className="text-xs text-neutral-500">מוקצה ל</div>
               {canAssignHere && !isClosed ? (
@@ -495,7 +571,7 @@ export default function ComplaintDetailPage() {
             )}
           </section>
 
-          {/* Progress snapshot (from DB) */}
+          {/* Progress snapshot */}
           <section className="rounded-xl border bg-white p-5 shadow-sm text-sm dark:border-neutral-800 dark:bg-neutral-900">
             <h4 className="mb-2 font-semibold">תקציר התקדמות</h4>
             <ul className="space-y-1">
