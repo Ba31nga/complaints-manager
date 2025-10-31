@@ -56,6 +56,14 @@ async function patchChangeDepartment(id: string, departmentId: string) {
   });
 }
 
+async function patchComplaint(id: string, patch: Partial<unknown>) {
+  await api<unknown>(`/api/complaints/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+}
+
 /* ─────────────────────────── Viewer (resolved from session + DB) ─────────────────────────── */
 type Viewer = { role: Role; userId: string; departmentId?: string };
 
@@ -290,14 +298,46 @@ export default function ComplaintDetailPage() {
     if (!canWriteHere || !isAssigned || isClosed) return;
     const body = employeeDraft.trim();
     if (!body) return;
-    alert("שמירת מכתב דורשת הרחבת הסכמה (messagesJSON/עמודות חדשות).");
+
+    // Create a new message authored by the current viewer and append to messages
+    const makeId = () =>
+      `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const newMsg = {
+      id: makeId(),
+      authorId: viewer!.userId,
+      body,
+      createdAt: new Date().toISOString(),
+    };
+
+    const updatedMessages = [...(complaint.messages || []), newMsg];
+
+    await patchComplaint(complaint.id, { messages: updatedMessages });
+    await refetchComplaint();
+    // keep text in editor
   };
 
   const onSubmitToPrincipal = async () => {
     if (!canWriteHere || !isAssigned || isAwaitingPrincipal || isClosed) return;
     const body = (employeeDraft || "").trim();
     if (!body) return;
-    alert("העברה לאישור דורשת הרחבת הסכמה (messagesJSON/עמודות חדשות).");
+
+    const makeId = () =>
+      `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const newMsg = {
+      id: makeId(),
+      authorId: viewer!.userId,
+      body,
+      createdAt: new Date().toISOString(),
+    };
+
+    const updatedMessages = [...(complaint.messages || []), newMsg];
+
+    // Mark complaint as awaiting principal review
+    await patchComplaint(complaint.id, {
+      messages: updatedMessages,
+      status: "AWAITING_PRINCIPAL_REVIEW",
+    });
+    await refetchComplaint();
   };
 
   const onPrincipalClose = async () => {
@@ -310,7 +350,35 @@ export default function ComplaintDetailPage() {
     if (!canPrincipalRespond) return;
     const reason = returnReason.trim();
     if (!reason) return;
-    alert("החזרה לעריכה דורשת הרחבת הסכמה (messagesJSON/עמודות חדשות).");
+
+    // Create a principal-return message and set returnInfo + status -> IN_PROGRESS
+    const makeId = () =>
+      `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const newMsg = {
+      id: makeId(),
+      authorId: viewer!.userId,
+      body: `__RETURN__:${reason}`,
+      createdAt: new Date().toISOString(),
+    };
+
+    const updatedMessages = [...(complaint.messages || []), newMsg];
+
+    const newReturnInfo = {
+      count: (complaint.returnInfo?.count || 0) + 1,
+      reason,
+      returnedAt: new Date().toISOString(),
+      returnedByUserId: viewer!.userId,
+    };
+
+    await patchComplaint(complaint.id, {
+      messages: updatedMessages,
+      returnInfo: newReturnInfo,
+      status: "IN_PROGRESS",
+    });
+
+    // refresh
+    await refetchComplaint();
+    // keep the principal return reason in the editor for further edits
   };
 
   /* ─────────────────────────── UI ─────────────────────────── */

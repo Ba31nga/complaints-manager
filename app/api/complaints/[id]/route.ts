@@ -36,7 +36,7 @@ async function readAllValues(): Promise<string[][]> {
   const sheets = getSheets("ro");
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: COMPLAINTS_SHEET_ID!,
-    range: `${TAB}!A:R`, // A..R per schema
+    range: `${TAB}!A:S`, // A..S per schema (messagesJSON + returnInfoJSON)
   });
   return res.data.values || [];
 }
@@ -85,7 +85,7 @@ export async function PATCH(req: Request, ctx: CtxMaybePromise) {
     const sheetsRO = getSheets("ro");
     const res = await sheetsRO.spreadsheets.values.get({
       spreadsheetId: COMPLAINTS_SHEET_ID,
-      range: `${TAB}!A:R`,
+      range: `${TAB}!A:S`,
     });
     const values = res.data.values || [];
     const hasHeader =
@@ -120,7 +120,7 @@ export async function PATCH(req: Request, ctx: CtxMaybePromise) {
       updatedAt: new Date().toISOString(),
     };
 
-    const a1 = `${TAB}!A${rowIdx}:R${rowIdx}`;
+    const a1 = `${TAB}!A${rowIdx}:S${rowIdx}`;
     const row = complaintToRow(merged);
 
     const sheetsRW = getSheets("rw");

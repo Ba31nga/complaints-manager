@@ -9,10 +9,11 @@ import type {
 
 /**
  * database!A:R
+ * database!A:S
  * A:id B:createdAt C:updatedAt D:title E:body F:status G:departmentId
  * H:assigneeUserId I:createdById J:reporterType K:reporterFullName L:reporterEmail M:reporterPhone
  * N:reporterJobTitle O:reporterDepartmentId P:reporterGrade Q:reporterClassNumber
- * R:messagesJSON
+ * R:messagesJSON S:returnInfoJSON
  */
 export const COMPLAINTS_HEADER_AR = [
   "id",
@@ -33,6 +34,7 @@ export const COMPLAINTS_HEADER_AR = [
   "reporterGrade",
   "reporterClassNumber",
   "messagesJSON",
+  "returnInfoJSON",
 ] as const;
 
 // ✅ Important: DO NOT put an optional param before a required one.
@@ -71,6 +73,29 @@ export function rowToComplaint(row: string[]): Complaint | null {
         };
 
   const messages = pj<ComplaintMessage[]>(row[17], []);
+  const returnInfo = pj<ReturnInfo | null>(row[18], null);
+
+  // Derive assigneeLetter from messages if present: prefer the latest message
+  // authored by the assigneeUserId (column H / index 7).
+  const assigneeUserId = row[7] || "";
+  let assigneeLetter: AssigneeLetter | undefined = undefined;
+  if (assigneeUserId) {
+    const byAssignee = messages
+      .filter((m) => m.authorId === assigneeUserId)
+      .sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+    if (byAssignee.length > 0) {
+      const latest = byAssignee[0];
+      assigneeLetter = {
+        body: latest.body || "",
+        authorUserId: latest.authorId,
+        updatedAt: latest.createdAt,
+        submittedAt: latest.createdAt,
+      };
+    }
+  }
 
   if (!row[0] || !row[1] || !row[3]) return null;
 
@@ -86,9 +111,13 @@ export function rowToComplaint(row: string[]): Complaint | null {
     createdById: row[8] || null,
     reporter,
     messages,
+    returnInfo,
     // Optional/undeclared columns in sheet remain undefined/null
-    assigneeLetter: undefined as unknown as AssigneeLetter | undefined,
-    returnInfo: null as ReturnInfo | null,
+    // but derive a best-effort assignee letter from messagesJSON so the UI
+    // can show and edit the last letter written by the assignee.
+    assigneeLetter,
+    // returnInfo is stored in column S as JSON (if present)
+    // keep reviewCycles undefined for now
     reviewCycles: undefined as unknown as ReviewCycle[] | undefined,
     principalReview: undefined,
     notificationEmail: undefined,
@@ -129,5 +158,6 @@ export function complaintToRow(c: Complaint): (string | number | boolean)[] {
     reporterGrade,
     reporterClassNumber,
     JSON.stringify(c.messages ?? []),
+    JSON.stringify(c.returnInfo ?? null),
   ];
 }
