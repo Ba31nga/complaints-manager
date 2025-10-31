@@ -1,10 +1,11 @@
 // FILE: app/(protected)/page.tsx
 "use client";
-
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import type { Complaint, Role, User, Department } from "@/app/lib/types";
+import Card from "@/app/components/Card";
+import StatusPill from "@/app/components/StatusPill";
 
 const DEADLINE_DAYS = 7;
 
@@ -22,34 +23,13 @@ function daysLeft(createdAt: string) {
   return DEADLINE_DAYS - age;
 }
 function urgencyMeta(createdAt: string) {
+  // Return only a simple label + rank. Visual treatment is handled with the
+  // minimal two-color system (primary + neutral) elsewhere.
   const age = diffDays(parseISOOrFallback(createdAt));
-  if (age > 7)
-    return {
-      label: "באיחור",
-      rank: 3,
-      bg: "bg-red-100 dark:bg-red-900/30",
-      text: "text-red-700 dark:text-red-400",
-    } as const;
-  if (age > 5)
-    return {
-      label: "דחוף",
-      rank: 2,
-      bg: "bg-orange-100 dark:bg-orange-900/30",
-      text: "text-orange-700 dark:text-orange-400",
-    } as const;
-  if (age > 3)
-    return {
-      label: "בינוני",
-      rank: 1,
-      bg: "bg-yellow-100 dark:bg-yellow-900/30",
-      text: "text-yellow-700 dark:text-yellow-400",
-    } as const;
-  return {
-    label: "נמוך",
-    rank: 0,
-    bg: "bg-green-100 dark:bg-green-900/30",
-    text: "text-green-700 dark:text-green-400",
-  } as const;
+  if (age > 7) return { label: "באיחור", rank: 3 } as const;
+  if (age > 5) return { label: "דחוף", rank: 2 } as const;
+  if (age > 3) return { label: "בינוני", rank: 1 } as const;
+  return { label: "נמוך", rank: 0 } as const;
 }
 
 /* -------------------- Viewer -------------------- */
@@ -207,8 +187,28 @@ export default function OpenComplaintsPage() {
   if (loading || status === "loading") {
     return (
       <div className="p-4" dir="rtl">
-        <div className="rounded-xl border bg-white p-6 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
-          טוען נתונים…
+        <div className="card p-6 flex items-center justify-center gap-3 text-sm text-neutral-600 dark:text-neutral-400">
+          <svg
+            className="h-5 w-5 animate-spin text-neutral-500"
+            viewBox="0 0 24 24"
+            fill="none"
+            aria-hidden
+          >
+            <circle
+              cx="12"
+              cy="12"
+              r="10"
+              stroke="currentColor"
+              strokeWidth="4"
+              className="opacity-25"
+            />
+            <path
+              fill="currentColor"
+              d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+              className="opacity-75"
+            />
+          </svg>
+          <span>טוען נתונים…</span>
         </div>
       </div>
     );
@@ -233,7 +233,7 @@ export default function OpenComplaintsPage() {
   }
 
   return (
-    <div className="p-4" dir="rtl">
+    <div className="p-4 container-max" dir="rtl">
       <div className="mb-6 flex items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold">פניות פתוחות</h1>
@@ -268,57 +268,47 @@ export default function OpenComplaintsPage() {
               <Link
                 key={c.id}
                 href={`/complaints/${c.id}`}
-                className={`rounded-lg border p-4 shadow-sm transition hover:shadow-md bg-white dark:bg-neutral-900 dark:border-neutral-800 ${meta.bg}`}
                 aria-label={`פתח תלונה: ${c.title}`}
               >
-                <div className="flex items-center justify-between gap-2">
-                  <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">
-                    {c.title}
-                  </h2>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${meta.text}`}
-                    title={`דחיפות: ${meta.label}`}
-                  >
-                    {meta.label}
-                  </span>
-                </div>
-
-                <p className="mt-2 line-clamp-3 text-sm text-neutral-700 dark:text-neutral-300">
-                  {c.body}
-                </p>
-
-                {viewer.role !== "EMPLOYEE" && c.reporter && (
-                  <div className="mt-3 text-xs text-neutral-700 dark:text-neutral-300">
-                    מאת:{" "}
-                    <span className="font-medium">{c.reporter.fullName}</span> (
-                    {c.reporter.email})
+                <Card className={`transition hover:shadow-md`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100 truncate">
+                        {c.title}
+                      </h2>
+                      <p className="mt-2 line-clamp-3 text-sm text-neutral-700 dark:text-neutral-300">
+                        {c.body}
+                      </p>
+                    </div>
+                    <div className="flex flex-col items-end gap-2">
+                      <StatusPill
+                        label={meta.label}
+                        tone={meta.rank >= 2 ? "accent" : "neutral"}
+                      />
+                      <div className="text-xs text-neutral-600 dark:text-neutral-400">
+                        {parseISOOrFallback(c.createdAt).toLocaleDateString(
+                          "he-IL",
+                          { timeZone: "Asia/Jerusalem" }
+                        )}
+                      </div>
+                    </div>
                   </div>
-                )}
 
-                <div className="mt-3 grid gap-1 text-xs text-neutral-600 dark:text-neutral-400">
-                  <div>
-                    נוצרה:{" "}
-                    {parseISOOrFallback(c.createdAt).toLocaleDateString(
-                      "he-IL",
-                      {
-                        timeZone: "Asia/Jerusalem",
-                      }
-                    )}
+                  <div className="mt-3 flex items-center justify-between text-xs text-neutral-600 dark:text-neutral-400">
+                    <div>
+                      {left < 0 ? (
+                        <span className="text-red-700 dark:text-red-400">
+                          באיחור {Math.abs(left)} ימים
+                        </span>
+                      ) : (
+                        <span className="text-neutral-800 dark:text-neutral-200">
+                          {left} ימים
+                        </span>
+                      )}
+                    </div>
+                    <div>{assignee ? `מוקצה ל: ${assignee.name}` : "—"}</div>
                   </div>
-                  <div>
-                    זמן עד יעד:{" "}
-                    {left < 0 ? (
-                      <span className="text-red-700 dark:text-red-400">
-                        באיחור {Math.abs(left)} ימים
-                      </span>
-                    ) : (
-                      <span className="text-neutral-800 dark:text-neutral-200">
-                        {left} ימים
-                      </span>
-                    )}
-                  </div>
-                  {assignee && <div>מוקצה ל: {assignee.name}</div>}
-                </div>
+                </Card>
               </Link>
             );
           })}

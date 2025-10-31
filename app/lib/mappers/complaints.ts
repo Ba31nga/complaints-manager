@@ -8,7 +8,6 @@ import type {
 } from "@/app/lib/types";
 
 /**
- * database!A:R
  * database!A:S
  * A:id B:createdAt C:updatedAt D:title E:body F:status G:departmentId
  * H:assigneeUserId I:createdById J:reporterType K:reporterFullName L:reporterEmail M:reporterPhone

@@ -1,3 +1,98 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+  /* Monochrome (black/white) theme */
+  --surface: 255 255 255; /* white surface */
+  --text: 15 23 42; /* dark text */
+  --muted: 100 116 139; /* neutral muted */
+  --primary: 0 0 0; /* black */
+  /* color to use on top of the primary background (contrast) */
+  --primary-foreground: 255 255 255;
+}
+
+.dark {
+  --surface: 10 10 10; /* dark surface */
+  --text: 245 245 245; /* light text */
+  --muted: 110 110 110;
+  --primary: 255 255 255; /* white */
+  --primary-foreground: 15 23 42;
+}
+
+.container-max {
+  max-width: 1100px;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+.card {
+  background-color: rgb(var(--surface) / 1);
+  border: 1px solid rgb(var(--muted) / 0.12);
+  border-radius: 12px;
+  padding: 1rem;
+  box-shadow: 0 6px 18px rgb(var(--muted) / 0.04);
+}
+
+/* Generic panel used for lightweight inset sections (adapts to dark mode) */
+.panel {
+  background-color: rgb(var(--surface) / 0.98);
+  border: 1px solid rgb(var(--muted) / 0.08);
+  padding: 0.75rem;
+  border-radius: 8px;
+}
+
+html,
+body {
+  background-color: rgb(var(--surface) / 1);
+  color: rgb(var(--text));
+  transition: background-color 180ms ease, color 180ms ease;
+}
+
+.btn-primary {
+  background-color: rgb(var(--primary) / 1);
+  /* ensure readable text on top of the primary background by using the
+     dedicated foreground variable which is inverted per theme above */
+  color: rgb(var(--primary-foreground));
+  padding: 0.5rem 0.85rem;
+  border-radius: 8px;
+  font-weight: 600;
+  transition: transform 150ms ease, box-shadow 150ms ease, opacity 120ms ease;
+}
+.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgb(var(--primary) / 0.12);
+}
+.btn-primary:focus {
+  outline: 3px solid rgb(var(--primary) / 0.12);
+}
+
+.btn-ghost {
+  background: transparent;
+  border: 1px solid rgb(var(--muted) / 0.12);
+  padding: 0.45rem 0.75rem;
+  border-radius: 8px;
+  /* use the primary color for ghost button text so it contrasts with the
+     surrounding surface in both light and dark themes */
+  color: rgb(var(--primary));
+}
+.btn-ghost:hover {
+  background: rgb(var(--muted) / 0.04);
+}
+.btn-ghost:focus {
+  outline: 2px solid rgb(var(--muted) / 0.12);
+}
+
+.muted {
+  color: rgb(var(--muted));
+}
+
+/* utility for the primary color */
+.text-primary {
+  color: rgb(var(--primary));
+}
+.bg-primary-ghost {
+  background-color: rgb(var(--primary) / 0.06);
+}

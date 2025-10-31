@@ -2,6 +2,8 @@
 import { getSheets, COMPLAINTS_SHEET_ID } from "@/app/lib/sheets";
 import { rowToComplaint, complaintToRow } from "@/app/lib/mappers/complaints";
 import type { Complaint } from "@/app/lib/types";
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 
 const TAB = process.env.GOOGLE_COMPLAINTS_TAB || "database";
 export const dynamic = "force-dynamic";
@@ -81,6 +83,48 @@ export async function PATCH(req: Request, ctx: CtxMaybePromise) {
     const { id } = await unwrapParams(ctx);
     const patch = (await req.json()) as Partial<Complaint>;
 
+    // Basic validation to avoid corrupting the sheet.
+    if (patch.messages !== undefined) {
+      const messagesUnknown = patch.messages as unknown;
+      if (!Array.isArray(messagesUnknown)) {
+        return Response.json(
+          { error: "messages must be an array" },
+          { status: 400 }
+        );
+      }
+      for (const mUnknown of messagesUnknown as unknown[]) {
+        const m = mUnknown as Record<string, unknown> | null;
+        if (
+          !m ||
+          typeof m.id !== "string" ||
+          typeof m.authorId !== "string" ||
+          typeof m.body !== "string" ||
+          typeof m.createdAt !== "string"
+        ) {
+          return Response.json(
+            { error: "invalid message shape" },
+            { status: 400 }
+          );
+        }
+      }
+    }
+
+    if (patch.returnInfo !== undefined && patch.returnInfo !== null) {
+      const ri = patch.returnInfo as Record<string, unknown> | null;
+      if (
+        !ri ||
+        typeof ri.count !== "number" ||
+        typeof ri.reason !== "string" ||
+        typeof ri.returnedAt !== "string" ||
+        typeof ri.returnedByUserId !== "string"
+      ) {
+        return Response.json(
+          { error: "invalid returnInfo shape" },
+          { status: 400 }
+        );
+      }
+    }
+
     // read all to locate row
     const sheetsRO = getSheets("ro");
     const res = await sheetsRO.spreadsheets.values.get({
@@ -111,6 +155,31 @@ export async function PATCH(req: Request, ctx: CtxMaybePromise) {
     const existing = rowToComplaint(existingRow);
     if (!existing) {
       return Response.json({ error: "Not found" }, { status: 404 });
+    }
+
+    // Server-side lock: if complaint is already awaiting principal review,
+    // only principals/admins may modify messages/status/assignee fields.
+    if (existing.status === "AWAITING_PRINCIPAL_REVIEW") {
+      const session = await getServerSession(authOptions);
+      const role =
+        session &&
+        (session as unknown as { user?: { role?: string } }).user?.role;
+      const isPrivileged = role === "PRINCIPAL" || role === "ADMIN";
+      if (!isPrivileged) {
+        const forbiddenKeys = [
+          "messages",
+          "status",
+          "assigneeUserId",
+          "assigneeLetter",
+        ];
+        const patchRecord = patch as Partial<Record<string, unknown>>;
+        if (forbiddenKeys.some((k) => patchRecord[k] !== undefined)) {
+          return Response.json(
+            { error: "Forbidden: complaint is awaiting principal review" },
+            { status: 403 }
+          );
+        }
+      }
     }
 
     const merged: Complaint = {

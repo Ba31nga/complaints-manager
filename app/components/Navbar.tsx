@@ -54,7 +54,7 @@ export default function Navbar() {
       dir="rtl"
     >
       <nav className="w-full">
-        <div className="flex h-14 items-center justify-between">
+        <div className="container-max flex h-14 items-center justify-between">
           {/* Brand */}
           <Link
             href="/"

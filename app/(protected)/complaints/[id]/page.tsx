@@ -1,5 +1,4 @@
 // FILE: app/(protected)/complaints/[id]/page.tsx
-/* eslint-disable react-hooks/exhaustive-deps */
 "use client";
 
 import Link from "next/link";
@@ -7,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import type { Complaint, Role, User, Department } from "@/app/lib/types";
+import Card from "@/app/components/Card";
 
 /* ─────────────────────────── DB Adapters ─────────────────────────── */
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
@@ -64,6 +64,10 @@ async function patchComplaint(id: string, patch: Partial<unknown>) {
   });
 }
 
+function makeId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 /* ─────────────────────────── Viewer (resolved from session + DB) ─────────────────────────── */
 type Viewer = { role: Role; userId: string; departmentId?: string };
 
@@ -103,6 +107,42 @@ function canPrincipalAct(viewer: Viewer) {
   return viewer.role === "PRINCIPAL" || viewer.role === "ADMIN";
 }
 
+// Format Israeli phone numbers for display and create a tel: href.
+function formatIsraeliPhone(phone?: string | null) {
+  if (!phone) return "";
+  const digits = phone.replace(/\D/g, "");
+  if (!digits) return phone;
+  // Normalize to local part (strip leading +972 or leading 0)
+  let local = digits;
+  if (local.startsWith("972")) local = local.slice(3);
+  else if (local.startsWith("0")) local = local.slice(1);
+
+  // Mobile numbers (9 digits local, e.g. 5xxxxxxxx)
+  if (local.length === 9) {
+    // format as 0AA-BBB-CCCC
+    const m = local.match(/^(\d{2})(\d{3})(\d{4})$/);
+    if (m) return `0${m[1]}-${m[2]}-${m[3]}`;
+  }
+
+  // Landlines (8 digits local) -> 0A-BBB-CCCC
+  if (local.length === 8) {
+    const m = local.match(/^(\d{1})(\d{3})(\d{4})$/);
+    if (m) return `0${m[1]}-${m[2]}-${m[3]}`;
+  }
+
+  // Fallback: return cleaned digits grouped
+  return phone;
+}
+
+function makeTelHref(phone?: string | null) {
+  if (!phone) return "";
+  let digits = phone.replace(/\D/g, "");
+  if (!digits) return phone;
+  if (digits.startsWith("0")) digits = `972${digits.slice(1)}`;
+  if (!digits.startsWith("+")) digits = `+${digits}`;
+  return `tel:${digits}`;
+}
+
 /* ─────────────────────────── Page ─────────────────────────── */
 export default function ComplaintDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -121,6 +161,7 @@ export default function ComplaintDetailPage() {
   const [principalDraft, setPrincipalDraft] = useState("");
   const [principalJust, setPrincipalJust] = useState<boolean | null>(null);
   const [returnReason, setReturnReason] = useState("");
+  const [actionLoading, setActionLoading] = useState(false);
 
   // Load DB + resolve viewer from session.email
   useEffect(() => {
@@ -204,8 +245,28 @@ export default function ComplaintDetailPage() {
   if (loading || sessionStatus === "loading") {
     return (
       <div className="p-4" dir="rtl">
-        <div className="rounded-xl border bg-white p-8 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
-          טוען נתונים…
+        <div className="card p-8 flex items-center justify-center gap-3 text-sm text-neutral-600 dark:text-neutral-400">
+          <svg
+            className="h-5 w-5 animate-spin text-neutral-500"
+            viewBox="0 0 24 24"
+            fill="none"
+            aria-hidden
+          >
+            <circle
+              cx="12"
+              cy="12"
+              r="10"
+              stroke="currentColor"
+              strokeWidth="4"
+              className="opacity-25"
+            />
+            <path
+              fill="currentColor"
+              d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+              className="opacity-75"
+            />
+          </svg>
+          <span>טוען נתונים…</span>
         </div>
       </div>
     );
@@ -227,7 +288,7 @@ export default function ComplaintDetailPage() {
           <div className="text-sm text-neutral-600 dark:text-neutral-400 mb-4">
             ייתכן שהקישור שגוי או שהפנייה הועברה/נמחקה.
           </div>
-          <Link className="text-blue-600 hover:underline" href="/">
+          <Link className="text-primary hover:underline" href="/">
             ← חזרה לכל הפניות
           </Link>
         </div>
@@ -242,6 +303,9 @@ export default function ComplaintDetailPage() {
   const assignee: User | null = effectiveAssigneeId
     ? users.find((u) => u.id === effectiveAssigneeId) ?? null
     : null;
+
+  // reporter shorthand
+  const reporter = complaint.reporter;
 
   const displayStatus = complaint.status;
 
@@ -299,45 +363,50 @@ export default function ComplaintDetailPage() {
     const body = employeeDraft.trim();
     if (!body) return;
 
-    // Create a new message authored by the current viewer and append to messages
-    const makeId = () =>
-      `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const newMsg = {
-      id: makeId(),
-      authorId: viewer!.userId,
-      body,
-      createdAt: new Date().toISOString(),
-    };
-
-    const updatedMessages = [...(complaint.messages || []), newMsg];
-
-    await patchComplaint(complaint.id, { messages: updatedMessages });
-    await refetchComplaint();
-    // keep text in editor
+    setActionLoading(true);
+    setErr(null);
+    try {
+      const newMsg = {
+        id: makeId(),
+        authorId: viewer!.userId,
+        body,
+        createdAt: new Date().toISOString(),
+      };
+      const updatedMessages = [...(complaint.messages || []), newMsg];
+      await patchComplaint(complaint.id, { messages: updatedMessages });
+      await refetchComplaint();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   const onSubmitToPrincipal = async () => {
-    if (!canWriteHere || !isAssigned || isAwaitingPrincipal || isClosed) return;
+    if (!canWriteHere || !isAssigned || isClosed) return;
     const body = (employeeDraft || "").trim();
     if (!body) return;
 
-    const makeId = () =>
-      `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const newMsg = {
-      id: makeId(),
-      authorId: viewer!.userId,
-      body,
-      createdAt: new Date().toISOString(),
-    };
-
-    const updatedMessages = [...(complaint.messages || []), newMsg];
-
-    // Mark complaint as awaiting principal review
-    await patchComplaint(complaint.id, {
-      messages: updatedMessages,
-      status: "AWAITING_PRINCIPAL_REVIEW",
-    });
-    await refetchComplaint();
+    setActionLoading(true);
+    setErr(null);
+    try {
+      const newMsg = {
+        id: makeId(),
+        authorId: viewer!.userId,
+        body,
+        createdAt: new Date().toISOString(),
+      };
+      const updatedMessages = [...(complaint.messages || []), newMsg];
+      await patchComplaint(complaint.id, {
+        messages: updatedMessages,
+        status: "AWAITING_PRINCIPAL_REVIEW",
+      });
+      await refetchComplaint();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   const onPrincipalClose = async () => {
@@ -350,40 +419,40 @@ export default function ComplaintDetailPage() {
     if (!canPrincipalRespond) return;
     const reason = returnReason.trim();
     if (!reason) return;
-
-    // Create a principal-return message and set returnInfo + status -> IN_PROGRESS
-    const makeId = () =>
+    const makeIdLocal = () =>
       `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const newMsg = {
-      id: makeId(),
+      id: makeIdLocal(),
       authorId: viewer!.userId,
       body: `__RETURN__:${reason}`,
       createdAt: new Date().toISOString(),
     };
-
     const updatedMessages = [...(complaint.messages || []), newMsg];
-
     const newReturnInfo = {
       count: (complaint.returnInfo?.count || 0) + 1,
       reason,
       returnedAt: new Date().toISOString(),
       returnedByUserId: viewer!.userId,
     };
-
-    await patchComplaint(complaint.id, {
-      messages: updatedMessages,
-      returnInfo: newReturnInfo,
-      status: "IN_PROGRESS",
-    });
-
-    // refresh
-    await refetchComplaint();
-    // keep the principal return reason in the editor for further edits
+    setActionLoading(true);
+    setErr(null);
+    try {
+      await patchComplaint(complaint.id, {
+        messages: updatedMessages,
+        returnInfo: newReturnInfo,
+        status: "IN_PROGRESS",
+      });
+      await refetchComplaint();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   /* ─────────────────────────── UI ─────────────────────────── */
   return (
-    <div className="p-4 md:p-6" dir="rtl">
+    <div className="p-4 md:p-6 container-max" dir="rtl">
       {/* Header */}
       <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
@@ -447,21 +516,19 @@ export default function ComplaintDetailPage() {
       <div className="grid gap-6 lg:grid-cols-[1fr,360px]">
         {/* Main */}
         <div className="space-y-4">
-          {/* Details */}
-          <section className="rounded-xl border bg-white p-5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
+          <Card>
             <h2 className="mb-2 text-sm font-semibold">פרטי הפנייה</h2>
             <p className="whitespace-pre-wrap text-sm leading-6 text-neutral-800 dark:text-neutral-200">
               {complaint.body}
             </p>
-          </section>
+          </Card>
 
-          {/* Return notice (future messagesJSON) */}
           {complaint.returnInfo &&
             (displayStatus === "IN_PROGRESS" ||
               displayStatus === "ASSIGNED") && (
               <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm dark:border-amber-900/50 dark:bg-amber-900/20">
                 <div className="font-medium mb-1">
-                  הוחזר לעריכה ע&quot;י מנהל/ת בית הספר
+                  הוחזר לעריכה על ידי מנהל/ת בית הספר
                 </div>
                 <div className="text-amber-800 dark:text-amber-200 whitespace-pre-wrap">
                   {complaint.returnInfo.reason}
@@ -469,8 +536,7 @@ export default function ComplaintDetailPage() {
               </div>
             )}
 
-          {/* Assignee letter */}
-          <section className="rounded-xl border bg-white p-5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
+          <section className="card">
             <div className="mb-2 flex items-center justify-between">
               <h3 className="text-sm font-semibold">מכתב המטפל/ת</h3>
               {displayStatus === "AWAITING_PRINCIPAL_REVIEW" && (
@@ -480,42 +546,52 @@ export default function ComplaintDetailPage() {
               )}
             </div>
 
+            {/* visually lock editor/buttons when awaiting principal review; no banner */}
+
             <textarea
-              className="w-full resize-y rounded-lg border px-3 py-2 text-sm outline-none dark:border-neutral-800 dark:bg-neutral-900"
+              className={`w-full resize-y rounded-lg border px-3 py-2 text-sm outline-none dark:border-neutral-800 ${
+                isAwaitingPrincipal
+                  ? "opacity-60 cursor-not-allowed bg-neutral-100 dark:bg-neutral-900/20"
+                  : "dark:bg-neutral-900"
+              }`}
               rows={8}
               placeholder="כתוב/כתבי כאן מכתב מפורט לפונה (ללא דיאלוג פנימי)."
               value={employeeDraft}
               onChange={(e) => setEmployeeDraft(e.target.value)}
               disabled={
-                !canWriteHere ||
-                !isAssigned ||
-                displayStatus === "AWAITING_PRINCIPAL_REVIEW" ||
-                isClosed
+                !canWriteHere || !isAssigned || isClosed || isAwaitingPrincipal
               }
             />
 
-            <div className="mt-2 flex flex-wrap gap-2">
+            <div className="mt-3 flex flex-wrap gap-2">
               <button
-                className="rounded-md border bg-neutral-900 px-3 py-1.5 text-sm text-white disabled:opacity-50 dark:bg-white dark:text-neutral-900"
+                className={`btn-primary ${actionLoading ? "opacity-70" : ""} ${
+                  isAwaitingPrincipal ? "opacity-60 cursor-not-allowed" : ""
+                }`}
                 onClick={onSaveAssigneeLetter}
                 disabled={
+                  actionLoading ||
                   !canWriteHere ||
                   !isAssigned ||
                   !employeeDraft.trim() ||
-                  isClosed
+                  isClosed ||
+                  isAwaitingPrincipal
                 }
               >
                 שמור מכתב
               </button>
               <button
-                className="rounded-md border border-blue-600 px-3 py-1.5 text-sm text-blue-700 transition hover:bg-blue-50 disabled:opacity-50 dark:border-blue-400 dark:text-blue-300 dark:hover:bg-blue-950/20"
+                className={`btn-ghost ${actionLoading ? "opacity-70" : ""} ${
+                  isAwaitingPrincipal ? "opacity-60 cursor-not-allowed" : ""
+                }`}
                 onClick={onSubmitToPrincipal}
                 disabled={
+                  actionLoading ||
                   !canWriteHere ||
                   !isAssigned ||
                   !employeeDraft.trim() ||
-                  displayStatus === "AWAITING_PRINCIPAL_REVIEW" ||
-                  isClosed
+                  isClosed ||
+                  isAwaitingPrincipal
                 }
               >
                 סיימתי טיפול — העבר לאישור מנהל/ת בית הספר
@@ -523,8 +599,7 @@ export default function ComplaintDetailPage() {
             </div>
           </section>
 
-          {/* Principal summary + return */}
-          <section className="rounded-xl border bg-white p-5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
+          <Card>
             <h3 className="mb-3 text-sm font-semibold">
               אישור מנהל/ת בית הספר / החזרה לעריכה
             </h3>
@@ -544,7 +619,7 @@ export default function ComplaintDetailPage() {
                     type="radio"
                     checked={principalJust === true}
                     onChange={() => setPrincipalJust(true)}
-                  />
+                  />{" "}
                   מוצדקת
                 </label>
                 <label className="inline-flex items-center gap-2">
@@ -552,7 +627,7 @@ export default function ComplaintDetailPage() {
                     type="radio"
                     checked={principalJust === false}
                     onChange={() => setPrincipalJust(false)}
-                  />
+                  />{" "}
                   לא מוצדקת
                 </label>
               </div>
@@ -565,7 +640,7 @@ export default function ComplaintDetailPage() {
                 onChange={(e) => setPrincipalDraft(e.target.value)}
               />
 
-              <div className="mt-4 rounded-lg border bg-neutral-50 p-3 text-sm dark:border-neutral-800 dark:bg-neutral-900/40">
+              <div className="mt-4 panel text-sm">
                 <div className="mb-2 font-medium">החזרה לעריכה אצל המטפל/ת</div>
                 <textarea
                   className="w-full resize-y rounded-lg border px-3 py-2 text-sm outline-none dark:border-neutral-800 dark:bg-neutral-900"
@@ -576,17 +651,24 @@ export default function ComplaintDetailPage() {
                 />
                 <div className="mt-2 flex justify-end gap-2">
                   <button
-                    className="rounded-md border px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-100 disabled:opacity-50 dark:text-neutral-200 dark:hover:bg-neutral-800/60"
+                    className={`btn-ghost ${actionLoading ? "opacity-70" : ""}`}
                     onClick={onPrincipalReturn}
-                    disabled={!returnReason.trim() || !canPrincipalRespond}
+                    disabled={
+                      actionLoading ||
+                      !returnReason.trim() ||
+                      !canPrincipalRespond
+                    }
                     type="button"
                   >
                     החזר לעריכה
                   </button>
                   <button
-                    className="rounded-md border bg-neutral-900 px-3 py-1.5 text-sm text-white disabled:opacity-50 dark:bg-white dark:text-neutral-900"
+                    className={`btn-primary ${
+                      actionLoading ? "opacity-70" : ""
+                    }`}
                     onClick={onPrincipalClose}
                     disabled={
+                      actionLoading ||
                       !canPrincipalRespond ||
                       principalJust === null ||
                       !principalDraft.trim()
@@ -598,11 +680,11 @@ export default function ComplaintDetailPage() {
                 </div>
               </div>
             </fieldset>
-          </section>
+          </Card>
         </div>
 
         {/* Side panel */}
-        <aside className="space-y-4 lg:sticky lg:top-6 h-fit">
+        <aside className="space-y-4 lg:sticky lg:top-20 h-fit">
           <section className="rounded-xl border bg-white p-5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
             <h4 className="mb-3 text-sm font-semibold">שיוך וטיפול</h4>
 
@@ -624,6 +706,11 @@ export default function ComplaintDetailPage() {
                 </select>
               ) : (
                 <div className="mt-1 text-sm">{dept?.name ?? "—"}</div>
+              )}
+              {!canChangeDeptHere && (
+                <div className="mt-1 text-xs text-neutral-500">
+                  אין הרשאה לשנות מחלקה
+                </div>
               )}
             </div>
 
@@ -656,6 +743,11 @@ export default function ComplaintDetailPage() {
                   {assignee ? assignee.name : "—"}
                 </div>
               )}
+              {!(canAssignHere && !isClosed) && (
+                <div className="mt-1 text-xs text-neutral-500">
+                  אין הרשאה לשייך מטפל/ת
+                </div>
+              )}
             </div>
 
             {!isAssigned && (
@@ -663,6 +755,36 @@ export default function ComplaintDetailPage() {
                 לא ניתן להתחיל בתהליך ללא שיוך מטפל/ת.
               </p>
             )}
+          </section>
+
+          {/* Reporter details (side panel) */}
+          <section className="rounded-xl border bg-white p-5 text-sm shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
+            <h4 className="mb-3 text-sm font-semibold">פרטי המדווח</h4>
+            <div className="text-sm text-neutral-800 dark:text-neutral-200 space-y-1">
+              <div className="font-medium">{reporter.fullName}</div>
+              {reporter.phone && (
+                <div>
+                  טלפון:
+                  <a
+                    className="text-primary hover:underline"
+                    href={makeTelHref(reporter.phone)}
+                  >
+                    {formatIsraeliPhone(reporter.phone)}
+                  </a>
+                </div>
+              )}
+              {reporter.email && (
+                <div>
+                  אימייל:
+                  <a
+                    className="text-primary hover:underline"
+                    href={`mailto:${reporter.email}`}
+                  >
+                    {reporter.email}
+                  </a>
+                </div>
+              )}
+            </div>
           </section>
 
           {/* Progress snapshot */}
@@ -695,12 +817,12 @@ export default function ComplaintDetailPage() {
             )}
           </section>
 
-          {/* Back link */}
+          {/* Back link (bottom) */}
           <section className="rounded-xl border bg-white p-5 text-sm shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
             <div className="mb-2 font-medium">ניווט מהיר</div>
             <ul className="space-y-1">
               <li>
-                <Link className="text-blue-600 hover:underline" href="/">
+                <Link className="text-primary hover:underline" href="/">
                   ← חזרה לכל הפניות
                 </Link>
               </li>
