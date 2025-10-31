@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSession } from "next-auth/react";
 import type { Complaint, Role, User, Department } from "@/app/lib/types";
 
 const DEADLINE_DAYS = 7;
@@ -54,15 +55,15 @@ function urgencyMeta(createdAt: string) {
 /* -------------------- Viewer -------------------- */
 type Viewer = { role: Role; userId: string; departmentId?: string };
 
-function readViewerFallback(users: User[] = []): Viewer {
-  const role = (localStorage.getItem("role") as Role | null) ?? "EMPLOYEE";
-  const userId = localStorage.getItem("userId") ?? "u2";
-  let departmentId = localStorage.getItem("departmentId") ?? "";
-  if (!departmentId) {
-    const u = users.find((x) => x.id === userId);
-    if (u) departmentId = u.departmentId;
+function isAbortError(err: unknown): boolean {
+  if (err instanceof DOMException && err.name === "AbortError") return true;
+  if (typeof err === "object" && err) {
+    const n = (err as { name?: unknown }).name;
+    if (n === "AbortError") return true;
+    const c = (err as { code?: unknown }).code;
+    if (c === 20) return true; // old Firefox
   }
-  return { role, userId, departmentId };
+  return false;
 }
 
 /* -------------------- Page -------------------- */
@@ -73,55 +74,102 @@ type AppData = {
 };
 
 export default function OpenComplaintsPage() {
+  const { data: session, status } = useSession(); // ← NextAuth session
   const [viewer, setViewer] = useState<Viewer | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
-  // Build a quick lookup map for assignees
   const userById = useMemo(() => {
     const m = new Map<string, User>();
     for (const u of users) m.set(u.id, u);
     return m;
   }, [users]);
 
-  // Load from API (users + departments + complaints)
   useEffect(() => {
     const ctrl = new AbortController();
+    let alive = true;
 
     (async () => {
       try {
         setLoading(true);
         setErr(null);
 
+        // 1) Load app data (users + complaints)
         const res = await fetch("/api/app-data", {
           cache: "no-store",
           signal: ctrl.signal,
         });
         if (!res.ok) throw new Error(await res.text());
-
         const { data }: { data: AppData } = await res.json();
+        if (!alive) return;
         setUsers(data.users);
         setComplaints(data.complaints);
-        setViewer(readViewerFallback(data.users));
-      } catch (e: unknown) {
-        if (e instanceof DOMException && e.name === "AbortError") return;
+
+        // 2) Resolve logged-in user (by email → sheet user)
+        let resolved: User | null = null;
+        const email = session?.user?.email?.toLowerCase();
+        if (email) {
+          try {
+            const meRes = await fetch(
+              `/api/users/by-email?email=${encodeURIComponent(email)}`,
+              { cache: "no-store", signal: ctrl.signal }
+            );
+            if (meRes.ok) {
+              const me: { data: User | null } = await meRes.json();
+              resolved = me.data ?? null;
+            }
+          } catch (e) {
+            if (!isAbortError(e)) {
+              // do not block UI on this; we’ll fallback below
+              console.warn("by-email lookup failed:", e);
+            }
+          }
+        }
+
+        // 3) Fallback: if not resolved by email, pick first user (UI remains usable)
+        const chosen = resolved ?? data.users[0] ?? null;
+        if (!alive) return;
+        if (chosen) {
+          setViewer({
+            userId: chosen.id,
+            role: chosen.role,
+            departmentId: chosen.departmentId,
+          });
+        } else {
+          setViewer(null);
+        }
+      } catch (e) {
+        if (isAbortError(e)) return;
         const msg = e instanceof Error ? e.message : "Failed to load data";
-        setErr(msg);
+        if (alive) setErr(msg);
       } finally {
-        setLoading(false);
+        if (alive) setLoading(false);
       }
     })();
 
-    return () => ctrl.abort();
-  }, []);
+    return () => {
+      alive = false;
+      ctrl.abort();
+    };
+  }, [session?.user?.email, status]); // rerun if login state changes
 
-  // Keep viewer in sync if user switches role/user in another tab
+  // Keep viewer in sync if role/user/department is overridden elsewhere (optional)
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
-      if (["role", "userId", "departmentId"].includes(e.key ?? "")) {
-        setViewer(readViewerFallback(users));
+      if (!["role", "userId", "departmentId"].includes(e.key ?? "")) return;
+      const current =
+        users.find((u) => u.id === (localStorage.getItem("userId") || "")) ??
+        null;
+      if (current) {
+        setViewer({
+          userId: current.id,
+          role: ((localStorage.getItem("role") as Role | null) ??
+            current.role) as Role,
+          departmentId:
+            localStorage.getItem("departmentId") ?? current.departmentId,
+        });
       }
     };
     window.addEventListener("storage", onStorage);
@@ -145,26 +193,21 @@ export default function OpenComplaintsPage() {
   }, [viewer, complaints]);
 
   const sorted = useMemo(() => {
-    // Sort by urgency rank desc, then createdAt desc (newest first)
     return [...filtered].sort((a, b) => {
       const ua = urgencyMeta(a.createdAt).rank;
       const ub = urgencyMeta(b.createdAt).rank;
       if (ub !== ua) return ub - ua;
-
       const ta = parseISOOrFallback(a.createdAt).getTime();
       const tb = parseISOOrFallback(b.createdAt).getTime();
       return tb - ta;
     });
   }, [filtered]);
 
-  if (loading) {
+  // While session is loading, keep the spinner so we don’t flash the fallback viewer
+  if (loading || status === "loading") {
     return (
       <div className="p-4" dir="rtl">
-        <div
-          className="rounded-xl border bg-white p-6 shadow-sm dark:border-neutral-800 dark:bg-neutral-900"
-          role="status"
-          aria-live="polite"
-        >
+        <div className="rounded-xl border bg-white p-6 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
           טוען נתונים…
         </div>
       </div>
@@ -179,7 +222,15 @@ export default function OpenComplaintsPage() {
       </div>
     );
   }
-  if (!viewer) return null;
+  if (!viewer) {
+    return (
+      <div className="p-4" dir="rtl">
+        <div className="rounded-xl border bg-white p-6 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
+          לא נמצא משתמש תואם לחשבון המחובר.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-4" dir="rtl">
@@ -249,7 +300,9 @@ export default function OpenComplaintsPage() {
                     נוצרה:{" "}
                     {parseISOOrFallback(c.createdAt).toLocaleDateString(
                       "he-IL",
-                      { timeZone: "Asia/Jerusalem" }
+                      {
+                        timeZone: "Asia/Jerusalem",
+                      }
                     )}
                   </div>
                   <div>

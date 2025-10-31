@@ -1,9 +1,11 @@
+// FILE: app/(protected)/complaints/[id]/page.tsx
 /* eslint-disable react-hooks/exhaustive-deps */
 "use client";
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
+import { useSession } from "next-auth/react";
 import type { Complaint, Role, User, Department } from "@/app/lib/types";
 
 /* ─────────────────────────── DB Adapters ─────────────────────────── */
@@ -14,9 +16,7 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
     try {
       const j = (await res.json()) as { error?: string };
       if (j?.error) msg = j.error;
-    } catch {
-      /* noop */
-    }
+    } catch {}
     throw new Error(msg);
   }
   return res.json() as Promise<T>;
@@ -34,6 +34,12 @@ async function fetchDepartments(): Promise<Department[]> {
   const { data } = await api<{ data: Department[] }>(`/api/departments`);
   return data;
 }
+async function fetchUserByEmail(email: string): Promise<User | null> {
+  const { data } = await api<{ data: User | null }>(
+    `/api/users/by-email?email=${encodeURIComponent(email)}`
+  );
+  return data ?? null;
+}
 
 async function patchAssign(id: string, userId: string | null) {
   await api<unknown>(`/api/complaints/${id}`, {
@@ -50,18 +56,18 @@ async function patchChangeDepartment(id: string, departmentId: string) {
   });
 }
 
-/* ─────────────────────────── Viewer (from localStorage) ─────────────────────────── */
+/* ─────────────────────────── Viewer (resolved from session + DB) ─────────────────────────── */
 type Viewer = { role: Role; userId: string; departmentId?: string };
 
-function readViewer(users: User[] = []): Viewer {
-  const role = (localStorage.getItem("role") as Role | null) ?? "EMPLOYEE";
-  const userId = localStorage.getItem("userId") ?? "u2";
-  let departmentId = localStorage.getItem("departmentId") ?? "";
-  if (!departmentId) {
-    const u = users.find((x) => x.id === userId);
-    if (u) departmentId = u.departmentId;
+function isAbortError(err: unknown): boolean {
+  if (err instanceof DOMException && err.name === "AbortError") return true;
+  if (typeof err === "object" && err) {
+    const name = (err as { name?: unknown }).name;
+    const code = (err as { code?: unknown }).code;
+    if (name === "AbortError") return true;
+    if (code === 20) return true; // legacy
   }
-  return { role, userId, departmentId };
+  return false;
 }
 
 /* ─────────────────────────── Helpers ─────────────────────────── */
@@ -92,6 +98,7 @@ function canPrincipalAct(viewer: Viewer) {
 /* ─────────────────────────── Page ─────────────────────────── */
 export default function ComplaintDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const { data: session, status: sessionStatus } = useSession();
 
   const [users, setUsers] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -101,19 +108,25 @@ export default function ComplaintDetailPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
-  // form state (להמשך חיווט אל messagesJSON)
+  // form state (future messages integration)
   const [employeeDraft, setEmployeeDraft] = useState("");
   const [principalDraft, setPrincipalDraft] = useState("");
   const [principalJust, setPrincipalJust] = useState<boolean | null>(null);
   const [returnReason, setReturnReason] = useState("");
 
-  // Load DB
+  // Load DB + resolve viewer from session.email
   useEffect(() => {
+    const ctrl = new AbortController();
     let alive = true;
+
     (async () => {
       try {
         setLoading(true);
         setErr(null);
+
+        // Wait for session to be ready so we can resolve viewer cleanly
+        if (sessionStatus === "loading") return;
+
         const [u, d, c] = await Promise.all([
           fetchUsers(),
           fetchDepartments(),
@@ -123,35 +136,48 @@ export default function ComplaintDetailPage() {
         setUsers(u);
         setDepartments(d);
         setComplaint(c);
-        setViewer(readViewer(u));
-        // init editors (when we add messages support)
+
+        // Resolve current user from email, fallback to first user (keeps UI usable)
+        const email = session?.user?.email?.toLowerCase() ?? "";
+        let me: User | null = null;
+        if (email) {
+          try {
+            me = await fetchUserByEmail(email);
+          } catch (e) {
+            if (!isAbortError(e)) console.warn("by-email lookup failed:", e);
+          }
+        }
+        const chosen = me ?? u[0] ?? null;
+
+        if (chosen) {
+          setViewer({
+            userId: chosen.id,
+            role: chosen.role,
+            departmentId: chosen.departmentId,
+          });
+        } else {
+          setViewer(null);
+        }
+
+        // init editors
         setEmployeeDraft(c.assigneeLetter?.body ?? "");
         setPrincipalDraft("");
         setPrincipalJust(null);
         setReturnReason("");
-      } catch (e: unknown) {
-        if (!alive) return;
+      } catch (e) {
+        if (isAbortError(e)) return;
         const message = e instanceof Error ? e.message : "Failed to load";
-        setErr(message);
+        if (alive) setErr(message);
       } finally {
         if (alive) setLoading(false);
       }
     })();
+
     return () => {
       alive = false;
+      ctrl.abort();
     };
-  }, [id]);
-
-  // Keep viewer in sync if role/user/departmentId changed in another tab
-  useEffect(() => {
-    const onStorage = (e: StorageEvent) => {
-      if (["role", "userId", "departmentId"].includes(e.key ?? "")) {
-        setViewer(readViewer(users));
-      }
-    };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, [users]);
+  }, [id, session?.user?.email, sessionStatus]);
 
   // assignable users per dept
   const assignableUsersForDept = useMemo(() => {
@@ -167,7 +193,7 @@ export default function ComplaintDetailPage() {
     return (deptId: string) => map.get(deptId) ?? [];
   }, [users, departments]);
 
-  if (loading) {
+  if (loading || sessionStatus === "loading") {
     return (
       <div className="p-4" dir="rtl">
         <div className="rounded-xl border bg-white p-8 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
@@ -259,7 +285,7 @@ export default function ComplaintDetailPage() {
     await refetchComplaint();
   };
 
-  // TODOs (דורש הרחבת סכמת הגיליון/קידוד ב-messagesJSON)
+  // TODOs – require schema extension in Sheets
   const onSaveAssigneeLetter = async () => {
     if (!canWriteHere || !isAssigned || isClosed) return;
     const body = employeeDraft.trim();

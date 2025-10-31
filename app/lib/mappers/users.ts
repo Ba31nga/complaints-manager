@@ -1,34 +1,21 @@
-import type { Department, User } from "@/app/lib/types";
+// FILE: /app/lib/mappers/users.ts
+import type { User } from "@/app/lib/types";
 
 /** users!A:G = count, fullName, id, armyMail, googleMail, role, department */
 export function rowsToUsers(rows: string[][]): User[] {
   return rows
-    .filter((r) => (r?.[2] || "").trim())
-    .map((r) => ({
-      id: (r[2] || "").trim(),
-      name: (r[1] || "").trim(),
-      role: (r[5] || "EMPLOYEE").trim() as User["role"],
-      departmentId: (r[6] || "").trim(),
-    }));
-}
+    .filter((r) => (r?.[2] || "").trim()) // require id (col C)
+    .map((r) => {
+      const name = (r[1] || "").trim(); // B
+      const id = (r[2] || "").trim(); // C
+      const armyMail = (r[3] || "").trim(); // D
+      const googleMail = (r[4] || "").trim(); // E
+      const role = (r[5] || "EMPLOYEE").trim() as User["role"]; // F
+      const departmentId = (r[6] || "").trim(); // G
 
-/** departments!A:A = simple list of names */
-function slugify(s: string) {
-  return s
-    .trim()
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, "-")
-    .replace(/(^-|-$)+/g, "");
-}
-
-export function rowsToDepartmentsSimple(rows: string[][]): Department[] {
-  const names = rows.map((r) => (r?.[0] || "").trim()).filter(Boolean);
-  return names
-    .filter((n) => n !== "Departments")
-    .map((name) => ({
-      id: slugify(name),
-      name,
-      managerUserId: "",
-      members: [],
-    }));
+      const u: User = { id, name, role, departmentId };
+      if (armyMail) u.armyMail = armyMail;
+      if (googleMail) u.googleMail = googleMail;
+      return u;
+    });
 }

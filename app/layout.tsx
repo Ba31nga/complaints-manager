@@ -1,6 +1,6 @@
-// /app/layout.tsx
 import "./globals.css";
 import Script from "next/script";
+import Providers from "./providers";
 
 const themeInit = `
 (function () {
@@ -26,7 +26,9 @@ export default function RootLayout({
         </Script>
       </head>
       <body className="h-full min-h-screen flex flex-col bg-neutral-50 text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100 antialiased">
-        <main className="flex-1">{children}</main>
+        <Providers>
+          <main className="flex-1">{children}</main>
+        </Providers>
       </body>
     </html>
   );
