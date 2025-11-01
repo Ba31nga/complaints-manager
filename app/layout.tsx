@@ -13,6 +13,14 @@ const themeInit = `
 })();
 `;
 
+export const metadata = {
+  title: "פניות לקוח",
+  description: "אתר פניות לקוח של המכללה הטכנולוגית של חיל האוויר באר שבע",
+  icons: {
+    icon: [{ url: "/logo.png", type: "image/png", sizes: "32x32" }],
+  },
+};
+
 export default function RootLayout({
   children,
 }: {
@@ -24,13 +32,7 @@ export default function RootLayout({
         <Script id="theme-init" strategy="beforeInteractive">
           {themeInit}
         </Script>
-
-        <link rel="icon" href="/favicon.ico" sizes="any" />
-        <link rel="icon" href="/icon.svg" type="image/svg+xml" />
-        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-        <meta name="theme-color" content="#000000" />
       </head>
-
       <body className="h-full min-h-screen flex flex-col bg-neutral-50 text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100 antialiased">
         <Providers>
           <main className="flex-1">{children}</main>
