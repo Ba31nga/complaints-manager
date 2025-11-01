@@ -13,10 +13,10 @@
 }
 
 .dark {
-  --surface: 10 10 10; /* dark surface */
-  --text: 245 245 245; /* light text */
+  --surface: 18 18 18;
+  --text: 245 245 245;
   --muted: 110 110 110;
-  --primary: 255 255 255; /* white */
+  --primary: 255 255 255;
   --primary-foreground: 15 23 42;
 }
 
