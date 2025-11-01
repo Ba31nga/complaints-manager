@@ -1,12 +1,12 @@
 // FILE: app/(protected)/complaints/[id]/page.tsx
 "use client";
-
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import type { Complaint, Role, User, Department } from "@/app/lib/types";
 import Card from "@/app/components/Card";
+import ErrorShell from "@/app/components/ErrorShell";
 
 /* ─────────────────────────── DB Adapters ─────────────────────────── */
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
@@ -272,6 +272,29 @@ export default function ComplaintDetailPage() {
     );
   }
   if (err) {
+    const lower = (err || "").toString().toLowerCase();
+    // render friendly error pages for auth/permission problems
+    if (lower.includes("unauthenticated") || lower.includes("401")) {
+      return (
+        <ErrorShell
+          title="לא מחובר/ת"
+          message={"עליך להתחבר כדי לצפות בפנייה זו."}
+          showRetry={false}
+          reportSubject={"דווח%20שגיאה%20-401"}
+        />
+      );
+    }
+    if (lower.includes("forbidden") || lower.includes("403")) {
+      return (
+        <ErrorShell
+          title="אין לך הרשאה"
+          message={"אין לך הרשאות לצפות או לערוך פנייה זו."}
+          showRetry={false}
+          reportSubject={"דווח%20שגיאה%20-403"}
+        />
+      );
+    }
+
     return (
       <div className="p-4" dir="rtl">
         <div className="rounded-xl border bg-red-100 p-8 text-red-700 shadow-sm dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-200">

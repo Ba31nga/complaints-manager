@@ -44,6 +44,43 @@
   border-radius: 8px;
 }
 
+/* Responsive tweaks for small screens */
+@media (max-width: 640px) {
+  .container-max {
+    max-width: 100%;
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+
+  .card {
+    padding: 0.75rem;
+    border-radius: 10px;
+  }
+
+  .panel {
+    padding: 0.5rem;
+    border-radius: 8px;
+  }
+
+  .btn-primary,
+  .btn-ghost {
+    padding: 0.45rem 0.65rem;
+    font-size: 0.95rem;
+  }
+
+  /* make large text slightly smaller on very small screens */
+  h1 {
+    font-size: 1.25rem;
+  }
+
+  /* Ensure full-width form controls feel comfortable on mobile */
+  textarea,
+  input,
+  select {
+    font-size: 0.95rem;
+  }
+}
+
 html,
 body {
   background-color: rgb(var(--surface) / 1);

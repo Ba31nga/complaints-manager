@@ -8,10 +8,12 @@ import { getUserByEmail } from "@/app/lib/sheets"; // keep your path
 type TokenWithClaims = JWT & {
   department?: string | null;
   role?: string | null;
+  userId?: string | null;
 };
 type SessionUserWithClaims = NonNullable<DefaultSession["user"]> & {
   department?: string | null;
   role?: string | null;
+  id?: string | null;
 };
 
 export const authOptions: NextAuthOptions = {
@@ -42,6 +44,7 @@ export const authOptions: NextAuthOptions = {
         const t = token as TokenWithClaims;
         t.department = sheetUser?.department ?? null;
         t.role = sheetUser?.role ?? null;
+        t.userId = sheetUser?.id ?? null;
         return t;
       }
       return token;
@@ -53,6 +56,7 @@ export const authOptions: NextAuthOptions = {
         const u = session.user as SessionUserWithClaims;
         u.department = t.department ?? null;
         u.role = t.role ?? null;
+        u.id = t.userId ?? null;
       }
       return session;
     },

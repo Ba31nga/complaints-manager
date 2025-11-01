@@ -60,6 +60,32 @@ export async function GET(_req: Request, ctx: CtxMaybePromise) {
     const c = rowToComplaint(found);
     if (!c) return Response.json({ error: "Not found" }, { status: 404 });
 
+    // Access control: enforce visibility based on role
+    try {
+      const session = await getServerSession(authOptions);
+      if (!session)
+        return Response.json({ error: "Unauthenticated" }, { status: 401 });
+      const user = session.user as
+        | { id?: string; department?: string; role?: string }
+        | undefined;
+      const role = user?.role;
+      const userId = user?.id;
+      const userDept = user?.department;
+
+      if (role === "MANAGER") {
+        if (!userDept || c.departmentId !== userDept) {
+          return Response.json({ error: "Forbidden" }, { status: 403 });
+        }
+      } else if (role === "EMPLOYEE") {
+        if (!userId || c.assigneeUserId !== userId) {
+          return Response.json({ error: "Forbidden" }, { status: 403 });
+        }
+      }
+      // PRINCIPAL/ADMIN: allowed
+    } catch (err) {
+      console.error("Error while checking session for complaint GET:", err);
+    }
+
     return Response.json({ data: c });
   } catch (e) {
     console.error("GET complaint error:", e);
@@ -155,6 +181,37 @@ export async function PATCH(req: Request, ctx: CtxMaybePromise) {
     const existing = rowToComplaint(existingRow);
     if (!existing) {
       return Response.json({ error: "Not found" }, { status: 404 });
+    }
+
+    // Access control: only privileged users or those assigned / in same department may update
+    try {
+      const session = await getServerSession(authOptions);
+      if (!session)
+        return Response.json({ error: "Unauthenticated" }, { status: 401 });
+      const user = session.user as
+        | { id?: string; department?: string; role?: string }
+        | undefined;
+      const role = user?.role;
+      const userId = user?.id;
+      const userDept = user?.department;
+
+      // Principals and admins can modify anything
+      if (role !== "PRINCIPAL" && role !== "ADMIN") {
+        if (role === "MANAGER") {
+          if (!userDept || existing.departmentId !== userDept) {
+            return Response.json({ error: "Forbidden" }, { status: 403 });
+          }
+        } else if (role === "EMPLOYEE") {
+          if (!userId || existing.assigneeUserId !== userId) {
+            return Response.json({ error: "Forbidden" }, { status: 403 });
+          }
+        } else {
+          // unknown role, deny
+          return Response.json({ error: "Forbidden" }, { status: 403 });
+        }
+      }
+    } catch (err) {
+      console.error("Error while checking session for complaint PATCH:", err);
     }
 
     // Server-side lock: if complaint is already awaiting principal review,

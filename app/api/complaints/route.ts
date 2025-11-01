@@ -2,6 +2,8 @@
 import { readComplaintsRaw } from "@/app/lib/sheets";
 import { rowToComplaint } from "@/app/lib/mappers/complaints";
 import type { Complaint, ComplaintStatus } from "@/app/lib/types";
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +24,38 @@ export async function GET(req: Request) {
     .slice(start)
     .map(rowToComplaint)
     .filter(Boolean) as Complaint[];
+
+  // Enforce server-side access control based on role
+  try {
+    const session = await getServerSession(authOptions);
+    const user = session?.user as
+      | { id?: string; department?: string; role?: string }
+      | undefined;
+    const role = user?.role as string | undefined;
+    const userId = user?.id as string | undefined;
+    const userDept = user?.department as string | undefined;
+
+    if (!session) {
+      // Unauthenticated — no access
+      return new Response(JSON.stringify({ error: "Unauthenticated" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (role === "MANAGER") {
+      // Managers only see complaints for their department
+      if (userDept) data = data.filter((c) => c.departmentId === userDept);
+      else data = [];
+    } else if (role === "EMPLOYEE") {
+      // Employees only see complaints assigned to them
+      if (userId) data = data.filter((c) => c.assigneeUserId === userId);
+      else data = [];
+    }
+    // PRINCIPAL/ADMIN: no additional filtering (see everything)
+  } catch (err) {
+    console.error("Error while checking session for complaints list:", err);
+  }
 
   if (status) data = data.filter((c) => c.status === status);
   if (departmentId) data = data.filter((c) => c.departmentId === departmentId);
