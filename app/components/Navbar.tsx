@@ -61,9 +61,9 @@ export default function Navbar() {
             className="inline-flex items-center gap-2 px-3 text-base font-semibold text-neutral-900 dark:text-neutral-100"
           >
             <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-violet-500 text-white">
-              ת
+              פ
             </span>
-            תלונות
+            פניות לקוח
           </Link>
 
           {/* Desktop nav */}
