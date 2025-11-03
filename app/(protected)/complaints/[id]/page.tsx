@@ -48,11 +48,11 @@ async function patchAssign(id: string, userId: string | null) {
     body: JSON.stringify({ assigneeUserId: userId }),
   });
 }
-async function patchChangeDepartment(id: string, departmentId: string) {
+async function patchChangeDepartment(id: string, departmentId: string | null) {
   await api<unknown>(`/api/complaints/${id}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ departmentId }),
+    body: JSON.stringify({ departmentId: departmentId ?? "" }),
   });
 }
 
@@ -112,25 +112,17 @@ function formatIsraeliPhone(phone?: string | null) {
   if (!phone) return "";
   const digits = phone.replace(/\D/g, "");
   if (!digits) return phone;
-  // Normalize to local part (strip leading +972 or leading 0)
   let local = digits;
   if (local.startsWith("972")) local = local.slice(3);
   else if (local.startsWith("0")) local = local.slice(1);
-
-  // Mobile numbers (9 digits local, e.g. 5xxxxxxxx)
   if (local.length === 9) {
-    // format as 0AA-BBB-CCCC
     const m = local.match(/^(\d{2})(\d{3})(\d{4})$/);
     if (m) return `0${m[1]}-${m[2]}-${m[3]}`;
   }
-
-  // Landlines (8 digits local) -> 0A-BBB-CCCC
   if (local.length === 8) {
     const m = local.match(/^(\d{1})(\d{3})(\d{4})$/);
     if (m) return `0${m[1]}-${m[2]}-${m[3]}`;
   }
-
-  // Fallback: return cleaned digits grouped
   return phone;
 }
 
@@ -163,6 +155,17 @@ export default function ComplaintDetailPage() {
   const [returnReason, setReturnReason] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
 
+  // NEW: blocking overlay state + helper
+  const [blocking, setBlocking] = useState(false);
+  async function withBlocking<T>(fn: () => Promise<T>) {
+    try {
+      setBlocking(true);
+      return await fn();
+    } finally {
+      setBlocking(false);
+    }
+  }
+
   // Load DB + resolve viewer from session.email
   useEffect(() => {
     const ctrl = new AbortController();
@@ -173,7 +176,6 @@ export default function ComplaintDetailPage() {
         setLoading(true);
         setErr(null);
 
-        // Wait for session to be ready so we can resolve viewer cleanly
         if (sessionStatus === "loading") return;
 
         const [u, d, c] = await Promise.all([
@@ -186,7 +188,6 @@ export default function ComplaintDetailPage() {
         setDepartments(d);
         setComplaint(c);
 
-        // Resolve current user from email, fallback to first user (keeps UI usable)
         const email = session?.user?.email?.toLowerCase() ?? "";
         let me: User | null = null;
         if (email) {
@@ -208,7 +209,6 @@ export default function ComplaintDetailPage() {
           setViewer(null);
         }
 
-        // init editors
         setEmployeeDraft(c.assigneeLetter?.body ?? "");
         setPrincipalDraft("");
         setPrincipalJust(null);
@@ -273,7 +273,6 @@ export default function ComplaintDetailPage() {
   }
   if (err) {
     const lower = (err || "").toString().toLowerCase();
-    // render friendly error pages for auth/permission problems
     if (lower.includes("unauthenticated") || lower.includes("401")) {
       return (
         <ErrorShell
@@ -319,22 +318,21 @@ export default function ComplaintDetailPage() {
     );
   }
 
-  // Effective values (DB)
-  const effectiveDeptId = complaint.departmentId;
+  // Effective values (DB) – default department to "" (no selection)
+  const effectiveDeptId = complaint.departmentId || "";
   const effectiveAssigneeId = complaint.assigneeUserId ?? null;
   const dept = departments.find((d) => d.id === effectiveDeptId) ?? null;
   const assignee: User | null = effectiveAssigneeId
     ? users.find((u) => u.id === effectiveAssigneeId) ?? null
     : null;
 
-  // reporter shorthand
   const reporter = complaint.reporter;
-
   const displayStatus = complaint.status;
 
   /* ───── Permissions ───── */
+  const hasDept = !!effectiveDeptId;
   const isAssigned = !!effectiveAssigneeId;
-  const canAssignHere = canAssign(viewer, effectiveDeptId);
+  const canAssignHere = hasDept && canAssign(viewer, effectiveDeptId);
   const canChangeDeptHere = canChangeDepartment(viewer);
   const canWriteHere = canAssigneeWrite(viewer, effectiveAssigneeId);
   const canPrincipalHere = canPrincipalAct(viewer);
@@ -351,7 +349,9 @@ export default function ComplaintDetailPage() {
   const canPrincipalRespond =
     canPrincipalHere && isAwaitingPrincipal && hasEmployeeLetter;
 
-  const nextHint = !isAssigned
+  const nextHint = !hasDept
+    ? "יש לבחור מחלקה לפני התחלת הטיפול."
+    : !isAssigned
     ? "יש לשייך מטפל/ת לפנייה לפני תחילת הטיפול."
     : isAwaitingPrincipal
     ? "ממתין/ה לאישור מנהל/ת בית הספר."
@@ -369,15 +369,25 @@ export default function ComplaintDetailPage() {
   };
 
   const onChangeDept = async (deptId: string) => {
-    if (!(canChangeDeptHere && !isClosed)) return;
-    await patchChangeDepartment(complaint.id, deptId);
-    await refetchComplaint();
+    if (!canChangeDeptHere || isClosed) return;
+    await withBlocking(async () => {
+      const newDeptId = deptId || ""; // allow clearing to "— ללא"
+      // When clearing department, also clear assignee on the server
+      await patchChangeDepartment(complaint.id, newDeptId || null);
+      if (!newDeptId && isAssigned) {
+        await patchAssign(complaint.id, null);
+      }
+      await refetchComplaint();
+    });
   };
 
   const onChangeAssignee = async (userId: string) => {
+    if (!hasDept) return; // cannot assign without department
     if (!(canAssignHere && !isClosed)) return;
-    await patchAssign(complaint.id, userId || null);
-    await refetchComplaint();
+    await withBlocking(async () => {
+      await patchAssign(complaint.id, userId || null);
+      await refetchComplaint();
+    });
   };
 
   // TODOs – require schema extension in Sheets
@@ -569,8 +579,6 @@ export default function ComplaintDetailPage() {
               )}
             </div>
 
-            {/* visually lock editor/buttons when awaiting principal review; no banner */}
-
             <textarea
               className={`w-full resize-y rounded-lg border px-3 py-2 text-sm outline-none dark:border-neutral-800 ${
                 isAwaitingPrincipal
@@ -717,10 +725,11 @@ export default function ComplaintDetailPage() {
               {canChangeDeptHere ? (
                 <select
                   className="mt-1 w-full rounded-md border px-2 py-1 text-sm dark:border-neutral-800 dark:bg-neutral-900"
-                  value={effectiveDeptId}
+                  value={effectiveDeptId} // "" means "— ללא"
                   onChange={(e) => onChangeDept(e.target.value)}
-                  disabled={isClosed}
+                  disabled={blocking || isClosed}
                 >
+                  <option value="">{`— ללא`}</option>
                   {departments.map((d) => (
                     <option key={d.id} value={d.id}>
                       {d.name}
@@ -735,6 +744,11 @@ export default function ComplaintDetailPage() {
                   אין הרשאה לשנות מחלקה
                 </div>
               )}
+              {!hasDept && (
+                <div className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                  יש לבחור מחלקה לפני שיוך מטפל/ת.
+                </div>
+              )}
             </div>
 
             {/* Assignee select */}
@@ -745,6 +759,7 @@ export default function ComplaintDetailPage() {
                   className="mt-1 w-full rounded-md border px-2 py-1 text-sm dark:border-neutral-800 dark:bg-neutral-900"
                   value={effectiveAssigneeId ?? ""}
                   onChange={(e) => onChangeAssignee(e.target.value)}
+                  disabled={blocking || !hasDept}
                 >
                   <option value="">— ללא</option>
                   {assignableUsersForDept(effectiveDeptId).map((m) => {
@@ -766,9 +781,11 @@ export default function ComplaintDetailPage() {
                   {assignee ? assignee.name : "—"}
                 </div>
               )}
-              {!(canAssignHere && !isClosed) && (
+              {(!hasDept || !(canAssignHere && !isClosed)) && (
                 <div className="mt-1 text-xs text-neutral-500">
-                  אין הרשאה לשייך מטפל/ת
+                  {!hasDept
+                    ? "בחר/י מחלקה כדי לשייך מטפל/ת"
+                    : "אין הרשאה לשייך מטפל/ת"}
                 </div>
               )}
             </div>
@@ -853,6 +870,41 @@ export default function ComplaintDetailPage() {
           </section>
         </aside>
       </div>
+
+      {/* Full-screen blocking spinner */}
+      {blocking && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-white/70 backdrop-blur-sm dark:bg-black/50"
+          aria-live="polite"
+          aria-busy="true"
+        >
+          <div className="flex flex-col items-center gap-3">
+            <svg
+              className="h-8 w-8 animate-spin text-neutral-600 dark:text-neutral-300"
+              viewBox="0 0 24 24"
+              fill="none"
+              aria-hidden
+            >
+              <circle
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                strokeWidth="4"
+                className="opacity-25"
+              />
+              <path
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+                className="opacity-75"
+              />
+            </svg>
+            <div className="text-sm text-neutral-700 dark:text-neutral-200">
+              מעדכן…
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
