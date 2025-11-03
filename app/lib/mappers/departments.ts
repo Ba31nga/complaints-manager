@@ -19,33 +19,37 @@ function safeJSON<T>(s?: string, fallback: T = [] as unknown as T): T {
 }
 
 /**
- * Flexible mapper:
- * - If rows look like [name] (1 column): create slug id, blank manager, empty members.
- * - If rows look like [id, name, managerUserId, membersJSON] (4 columns): use them.
- * Skips header rows like 'Departments'.
+ * Flexible mapper for departments.
+ *
+ * Supported shapes:
+ * - Simple: [name] → A=name (id is synthesized from slug(name))
+ * - Extended (new): [name, id, managerUserId?, membersJSON?]
+ *
+ * Skips header-ish rows like "Departments" or rows with an empty name.
  */
 export function rowsToDepartments(rows: string[][]): Department[] {
   const out: Department[] = [];
 
   for (const r of rows) {
-    const a = (r?.[0] || "").trim();
-    const b = (r?.[1] || "").trim();
-    const c = (r?.[2] || "").trim();
-    const d = (r?.[3] || "").trim();
+    const a = (r?.[0] || "").trim(); // name
+    const b = (r?.[1] || "").trim(); // id
+    const c = (r?.[2] || "").trim(); // managerUserId (optional)
+    const d = (r?.[3] || "").trim(); // membersJSON (optional)
 
-    // skip empty / header lines
-    if (!a || a === "Departments") continue;
+    // Skip empty / header rows
+    if (!a) continue;
+    if (/^departments?$/i.test(a) || /^name$/i.test(a)) continue;
 
     if (r.length >= 2 && b) {
-      // Extended shape: A:id, B:name, C:managerUserId, D:membersJSON
+      // Extended/new shape: A=name, B=id, C=managerUserId?, D=membersJSON?
       out.push({
-        id: a,
-        name: b,
+        id: b,
+        name: a,
         managerUserId: c || "",
         members: safeJSON<string[]>(d, []),
       });
     } else {
-      // Simple shape: A:name → synthesize
+      // Simple/legacy shape: only A=name → synthesize id
       const name = a;
       out.push({
         id: slugify(name) || "dept",

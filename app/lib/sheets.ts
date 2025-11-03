@@ -3,7 +3,13 @@ import { google, sheets_v4 } from "googleapis";
 
 /** ── ENV (required) ───────────────────────────────────────────────────────── */
 const SA_EMAIL = process.env.GOOGLE_SA_CLIENT_EMAIL;
-const SA_KEY = process.env.GOOGLE_SA_PRIVATE_KEY;
+
+// Normalize multiline private key if it arrives with escaped "\n"
+const SA_KEY_RAW = process.env.GOOGLE_SA_PRIVATE_KEY;
+const SA_KEY =
+  SA_KEY_RAW && SA_KEY_RAW.includes("\\n")
+    ? SA_KEY_RAW.replace(/\\n/g, "\n")
+    : SA_KEY_RAW;
 
 // users + departments live here
 export const USERS_SHEET_ID = process.env.GOOGLE_SHEETS_ID!;
@@ -137,10 +143,38 @@ export async function readUsers(): Promise<SheetUser[]> {
   });
 }
 
-/** Departments: single-column list per your screenshot (A:A) */
+/** ── Departments (A:name, B:id) ───────────────────────────────────────────── */
+
+export type SheetDepartment = {
+  /** Column A */ name: string;
+  /** Column B */ id: string;
+};
+
+/**
+ * Reads departments as typed objects.
+ * Expected columns: A=name, B=id (starting at row 2)
+ */
+export async function readDepartments(): Promise<SheetDepartment[]> {
+  if (!USERS_SHEET_ID)
+    throw new Error("Missing GOOGLE_SHEETS_ID (users sheet)");
+  const RANGE = `${DEPARTMENTS_TAB}!A2:B`;
+  const rows = await readRange(USERS_SHEET_ID, RANGE, "ro");
+
+  return rows
+    .map((r) => {
+      const [name = "", id = ""] = r;
+      return { name: name.trim(), id: id.trim() };
+    })
+    .filter((d) => d.name && d.id);
+}
+
+/**
+ * Raw departments matrix (now A:B rather than A:A).
+ * Useful for callers that still expect a 2D array.
+ */
 export async function readDepartmentsRaw(): Promise<string[][]> {
   if (!USERS_SHEET_ID) return [];
-  return readRange(USERS_SHEET_ID, `${DEPARTMENTS_TAB}!A:A`, "ro");
+  return readRange(USERS_SHEET_ID, `${DEPARTMENTS_TAB}!A:B`, "ro");
 }
 
 /** Roles: single-column list (A:A) */
@@ -149,7 +183,7 @@ export async function readRolesRaw(): Promise<string[][]> {
   return readRange(USERS_SHEET_ID, `${ROLES_TAB}!A:A`, "ro");
 }
 
-/** Complaints: A..R (id..messagesJSON) in `database` tab */
+/** Complaints: A..S (id..returnInfoJSON) in `database` tab */
 export async function readComplaintsRaw(): Promise<string[][]> {
   if (!COMPLAINTS_SHEET_ID)
     throw new Error("Missing GOOGLE_SHEETS_COMPLAINTS_ID");
