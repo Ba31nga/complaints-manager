@@ -445,7 +445,23 @@ export default function ComplaintDetailPage() {
   const onPrincipalClose = async () => {
     if (!canPrincipalRespond) return;
     if (principalJust === null || !principalDraft.trim()) return;
-    alert("סגירה דורשת הרחבת הסכמה (messagesJSON/עמודות חדשות).");
+    setActionLoading(true);
+    setErr(null);
+    try {
+      await patchComplaint(complaint.id, {
+        close: true,
+        principalReview: {
+          justified: principalJust,
+          summary: principalDraft.trim(),
+          signedByUserId: viewer!.userId,
+        },
+      });
+      await refetchComplaint();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   const onPrincipalReturn = async () => {

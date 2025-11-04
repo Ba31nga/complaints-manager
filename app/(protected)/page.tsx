@@ -57,9 +57,16 @@ export default function OpenComplaintsPage() {
   const { data: session, status } = useSession(); // ← NextAuth session
   const [viewer, setViewer] = useState<Viewer | null>(null);
   const [users, setUsers] = useState<User[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+
+  // Filters
+  const [q, setQ] = useState("");
+  const [qDebounced, setQDebounced] = useState("");
+  const [departmentId, setDepartmentId] = useState<string>("");
+  const [assigneeUserId, setAssigneeUserId] = useState<string>("");
 
   const userById = useMemo(() => {
     const m = new Map<string, User>();
@@ -85,6 +92,7 @@ export default function OpenComplaintsPage() {
         const { data }: { data: AppData } = await res.json();
         if (!alive) return;
         setUsers(data.users);
+        setDepartments(data.departments);
         setComplaints(data.complaints);
 
         // 2) Resolve logged-in user (by email → sheet user)
@@ -135,6 +143,12 @@ export default function OpenComplaintsPage() {
     };
   }, [session?.user?.email, status]); // rerun if login state changes
 
+  // Debounce q for smoother client-side filtering
+  useEffect(() => {
+    const t = setTimeout(() => setQDebounced(q), 200);
+    return () => clearTimeout(t);
+  }, [q]);
+
   // Keep viewer in sync if role/user/department is overridden elsewhere (optional)
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
@@ -164,13 +178,33 @@ export default function OpenComplaintsPage() {
       "IN_PROGRESS",
       "AWAITING_PRINCIPAL_REVIEW",
     ];
-    const openish = complaints.filter((c) => active.includes(c.status));
+    let openish = complaints.filter((c) => active.includes(c.status));
 
-    if (viewer.role === "ADMIN" || viewer.role === "PRINCIPAL") return openish;
-    if (viewer.role === "MANAGER")
-      return openish.filter((c) => c.departmentId === viewer.departmentId);
-    return openish.filter((c) => c.assigneeUserId === viewer.userId);
-  }, [viewer, complaints]);
+    // Role scope
+    if (viewer.role === "ADMIN" || viewer.role === "PRINCIPAL") {
+      // see all active
+    } else if (viewer.role === "MANAGER") {
+      openish = openish.filter((c) => c.departmentId === viewer.departmentId);
+    } else {
+      openish = openish.filter((c) => c.assigneeUserId === viewer.userId);
+    }
+
+    // Additional filters
+    if (qDebounced.trim()) {
+      const needle = qDebounced.trim().toLowerCase();
+      openish = openish.filter((c) =>
+        (c.title + " " + c.body).toLowerCase().includes(needle)
+      );
+    }
+    if (departmentId) {
+      openish = openish.filter((c) => c.departmentId === departmentId);
+    }
+    if (assigneeUserId) {
+      openish = openish.filter((c) => c.assigneeUserId === assigneeUserId);
+    }
+
+    return openish;
+  }, [viewer, complaints, qDebounced, departmentId, assigneeUserId]);
 
   const sorted = useMemo(() => {
     return [...filtered].sort((a, b) => {
@@ -241,14 +275,40 @@ export default function OpenComplaintsPage() {
             מוצגות לפי דחיפות — יעד טיפול: {DEADLINE_DAYS} ימים.
           </p>
         </div>
+      </div>
 
-        <div
-          className="text-xs text-neutral-600 dark:text-neutral-400"
-          aria-label="viewer info"
+      {/* Filters */}
+      <div className="mb-4 grid gap-3 sm:grid-cols-3">
+        <input
+          className="w-full rounded-md border px-3 py-2 text-sm dark:border-neutral-800 dark:bg-neutral-900"
+          placeholder="חיפוש חופשי (כותרת/תוכן)"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+        <select
+          className="w-full rounded-md border px-2 py-2 text-sm dark:border-neutral-800 dark:bg-neutral-900"
+          value={departmentId}
+          onChange={(e) => setDepartmentId(e.target.value)}
         >
-          תפקיד: <span className="font-medium">{viewer.role}</span> · משתמש:{" "}
-          <span className="font-mono">{viewer.userId}</span>
-        </div>
+          <option value="">כל המחלקות</option>
+          {departments.map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.name}
+            </option>
+          ))}
+        </select>
+        <select
+          className="w-full rounded-md border px-2 py-2 text-sm dark:border-neutral-800 dark:bg-neutral-900"
+          value={assigneeUserId}
+          onChange={(e) => setAssigneeUserId(e.target.value)}
+        >
+          <option value="">כל המטפלים/ות</option>
+          {users.map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.name}
+            </option>
+          ))}
+        </select>
       </div>
 
       {sorted.length === 0 ? (

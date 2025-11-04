@@ -222,8 +222,8 @@ export const complaints: Complaint[] = [
     principalReview: {
       justified: true,
       summary: "הפנייה מוצדקת – הציוד הוחזר ונשלח מייל סיכום.",
-      principalUserId: "u7",
-      reviewedAt: daysAgo(1),
+      signedByUserId: "u7",
+      signedAt: daysAgo(1),
     },
     notificationEmail: {
       sent: true,
@@ -438,8 +438,8 @@ export const complaints: Complaint[] = [
     principalReview: {
       justified: true,
       summary: "התקלה טופלה במלואה.",
-      principalUserId: "u7",
-      reviewedAt: daysAgo(1),
+      signedByUserId: "u7",
+      signedAt: daysAgo(1),
     },
     notificationEmail: {
       sent: true,
@@ -716,8 +716,8 @@ export function principalApproveAndClose(
   c.principalReview = {
     justified,
     summary: summary.trim(),
-    principalUserId,
-    reviewedAt: ts,
+    signedByUserId: principalUserId,
+    signedAt: ts,
   };
   c.returnInfo = null;
   c.status = "CLOSED";

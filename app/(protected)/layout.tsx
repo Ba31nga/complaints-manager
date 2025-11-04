@@ -1,5 +1,6 @@
 // /app/(protected)/layout.tsx
 import Navbar from "@/app/components/Navbar";
+import TutorialFab from "@/app/components/TutorialFab";
 
 export default function ProtectedLayout({
   children,
@@ -13,6 +14,9 @@ export default function ProtectedLayout({
 
       {/* Page content fills the rest of the window */}
       <main className="flex-1">{children}</main>
+
+      {/* Floating tutorial button */}
+      <TutorialFab position="bottom-left" />
     </div>
   );
 }

@@ -8,11 +8,11 @@ import type {
 } from "@/app/lib/types";
 
 /**
- * database!A:S
+ * database!A:T
  * A:id B:createdAt C:updatedAt D:title E:body F:status G:departmentId
  * H:assigneeUserId I:createdById J:reporterType K:reporterFullName L:reporterEmail M:reporterPhone
  * N:reporterJobTitle O:reporterDepartmentId P:reporterGrade Q:reporterClassNumber
- * R:messagesJSON S:returnInfoJSON
+ * R:messagesJSON S:returnInfoJSON T:principalReviewJSON
  */
 export const COMPLAINTS_HEADER_AR = [
   "id",
@@ -34,6 +34,7 @@ export const COMPLAINTS_HEADER_AR = [
   "reporterClassNumber",
   "messagesJSON",
   "returnInfoJSON",
+  "principalReviewJSON",
 ] as const;
 
 // ✅ Important: DO NOT put an optional param before a required one.
@@ -73,6 +74,7 @@ export function rowToComplaint(row: string[]): Complaint | null {
 
   const messages = pj<ComplaintMessage[]>(row[17], []);
   const returnInfo = pj<ReturnInfo | null>(row[18], null);
+  const principalReview = pj<Complaint["principalReview"]>(row[19], null);
 
   // Derive assigneeLetter from messages if present: prefer the latest message
   // authored by the assigneeUserId (column H / index 7).
@@ -111,6 +113,7 @@ export function rowToComplaint(row: string[]): Complaint | null {
     reporter,
     messages,
     returnInfo,
+    principalReview,
     // Optional/undeclared columns in sheet remain undefined/null
     // but derive a best-effort assignee letter from messagesJSON so the UI
     // can show and edit the last letter written by the assignee.
@@ -118,7 +121,6 @@ export function rowToComplaint(row: string[]): Complaint | null {
     // returnInfo is stored in column S as JSON (if present)
     // keep reviewCycles undefined for now
     reviewCycles: undefined as unknown as ReviewCycle[] | undefined,
-    principalReview: undefined,
     notificationEmail: undefined,
   };
 }
@@ -158,5 +160,6 @@ export function complaintToRow(c: Complaint): (string | number | boolean)[] {
     reporterClassNumber,
     JSON.stringify(c.messages ?? []),
     JSON.stringify(c.returnInfo ?? null),
+    JSON.stringify(c.principalReview ?? null),
   ];
 }

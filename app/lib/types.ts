@@ -111,9 +111,10 @@ export type Complaint = {
   principalReview?: {
     justified: boolean;
     summary: string;
-    principalUserId: string;
-    reviewedAt: string;
-  };
+    signedByUserId: string;
+    signedAt: string;
+    signatureImagePath?: string;
+  } | null;
   notificationEmail?: {
     sent: boolean;
     sentAt?: string;

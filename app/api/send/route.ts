@@ -1,8 +1,8 @@
 // File: app/api/send/route.ts
 
 import { NextResponse } from "next/server";
-import nodemailer from "nodemailer";
 import type { SendMailOptions } from "nodemailer";
+import { sendMail } from "@/app/lib/mailer";
 import { z } from "zod";
 
 /* ------------ Runtime ------------ */
@@ -30,16 +30,7 @@ const RequestSchema = z.object({
 
 type SendRequest = z.infer<typeof RequestSchema>;
 
-/* ------------ Transport (Gmail App Password) ------------ */
-const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 465,
-  secure: true,
-  auth: {
-    user: process.env.GMAIL_USER,
-    pass: process.env.GMAIL_APP_PASSWORD,
-  },
-});
+// Uses centralized transport in app/lib/mailer to avoid duplication
 
 /* ------------ Optional: generate simple PDF ------------ */
 async function generateSamplePdf(): Promise<Buffer> {
@@ -127,8 +118,7 @@ export async function POST(req: Request) {
 
     const attachments = await buildAttachments(data.attachments);
 
-    const info = await transporter.sendMail({
-      from: process.env.MAIL_FROM ?? process.env.GMAIL_USER,
+    const info = await sendMail({
       to: data.to,
       subject: data.subject,
       text: data.text ?? undefined,

@@ -1,0 +1,1 @@
+export { notifyOnComplaintPatch } from "./notify";
