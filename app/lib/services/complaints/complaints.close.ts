@@ -6,20 +6,21 @@ import { complaintToRow } from "@/app/lib/mappers/complaints";
 import { updateComplaintRow } from "@/app/lib/services/complaints/complaints.sheets";
 import { notifyOnComplaintPatch } from "@/app/lib/services/complaints/complaints.notifications";
 import { readDepartments, getUserByEmail } from "@/app/lib/sheets";
-import path from "node:path";
-import { buildComplaintClosurePdf } from "@/app/lib/pdf/complaintClosurePdf";
-import { generatePdfFromGoogleDoc } from "@/app/lib/services/docsPdf";
-import { config } from "@/app/lib/config";
 import { appLink, sendMail } from "@/app/lib/mailer";
-import { logoCidAttachment, renderTicketEmail, renderParagraphsHtml } from "@/app/lib/emailTemplates";
-import type Mail from "nodemailer/lib/mailer";
-import { DRIVE_FOLDER_ID, uploadPdfToDrive } from "@/app/lib/drive";
+import {
+  renderTicketEmail,
+  renderParagraphsHtml,
+} from "@/app/lib/emailTemplates";
+import { getSheets } from "@/app/lib/sheets";
 
 export async function closeComplaintFlow(params: {
   existing: Complaint;
   rowIdx: number;
-  patch: Partial<Complaint> & Partial<{ principalReview: Complaint["principalReview"] }>;
-}): Promise<{ ok: true; emailed: boolean } | { error: string; status: number }> {
+  patch: Partial<Complaint> &
+    Partial<{ principalReview: Complaint["principalReview"] }>;
+}): Promise<
+  { ok: true; emailed: boolean } | { error: string; status: number }
+> {
   const { existing, rowIdx, patch } = params;
 
   const session = await getServerSession(authOptions);
@@ -37,14 +38,22 @@ export async function closeComplaintFlow(params: {
 
   const pr = (patch.principalReview || null) as Complaint["principalReview"];
   if (!pr || typeof pr.justified !== "boolean") {
-    return { error: "Missing or invalid principalReview.justified", status: 400 } as const;
+    return {
+      error: "Missing or invalid principalReview.justified",
+      status: 400,
+    } as const;
   }
   const summary = String(pr.summary ?? "").trim();
-  if (!summary) return { error: "Principal summary is required", status: 400 } as const;
+  if (!summary)
+    return { error: "Principal summary is required", status: 400 } as const;
   if (summary.length > 5000)
-    return { error: "Principal summary too long (max 5000)", status: 400 } as const;
+    return {
+      error: "Principal summary too long (max 5000)",
+      status: 400,
+    } as const;
   const signedByUserId = String(pr.signedByUserId || "").trim();
-  if (!signedByUserId) return { error: "signedByUserId is required", status: 400 } as const;
+  if (!signedByUserId)
+    return { error: "signedByUserId is required", status: 400 } as const;
 
   const signedAt = new Date().toISOString();
   const signatureImagePath = pr.signatureImagePath || undefined;
@@ -76,7 +85,8 @@ export async function closeComplaintFlow(params: {
   // Reporter email (best effort)
   let emailed = false;
   try {
-    const reporterEmail = (mergedClose.reporter as { email?: string } | undefined)?.email || "";
+    const reporterEmail =
+      (mergedClose.reporter as { email?: string } | undefined)?.email || "";
     if (isValidEmail(reporterEmail)) {
       // Resolve department name
       let departmentName = "—";
@@ -91,7 +101,8 @@ export async function closeComplaintFlow(params: {
       // Resolve principal display name/role
       let principalName = "—";
       let principalRole = "מנהל/ת בית הספר";
-      const email = (session.user as { email?: string } | undefined)?.email || "";
+      const email =
+        (session.user as { email?: string } | undefined)?.email || "";
       if (email) {
         try {
           const sheetUser = await getUserByEmail(email);
@@ -102,47 +113,30 @@ export async function closeComplaintFlow(params: {
         }
       }
 
-      const logoPath = path.join(process.cwd(), "public", "emailLogo.png");
-
-      let pdfBuffer: Buffer | null = null;
-      let pdfFilename = "";
+      // Trigger Apps Script to handle complaint closure
+      const sheets = getSheets("rw");
       try {
-        if (config.GOOGLE_DOCS_TEMPLATE_ID) {
-          const filename = `complaint-${mergedClose.id}.pdf`;
-          const justifiedLabel = mergedClose.principalReview?.justified
-            ? "מוצדקת"
-            : "לא מוצדקת";
-          const { buffer } = await generatePdfFromGoogleDoc({
-            templateId: config.GOOGLE_DOCS_TEMPLATE_ID,
-            filename,
-            data: {
-              COMPLAINT_ID: mergedClose.id,
-              COMPLAINT_TITLE: mergedClose.title || "",
-              DEPARTMENT_NAME: departmentName,
-              PRINCIPAL_NAME: principalName,
-              PRINCIPAL_ROLE: principalRole,
-              SIGNED_AT: new Date(mergedClose.principalReview?.signedAt || mergedClose.updatedAt).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" }),
-              JUSTIFIED_LABEL: justifiedLabel,
-              SUMMARY: mergedClose.principalReview?.summary || "",
-              REPORTER_NAME: mergedClose.reporter.fullName || "",
-            },
-          });
-          pdfBuffer = buffer;
-          pdfFilename = filename;
-        } else {
-          const built = await buildComplaintClosurePdf({
-            complaint: mergedClose,
-            departmentName,
-            principalName,
-            principalRole,
-            logoPath,
-            signatureImagePath: mergedClose.principalReview?.signatureImagePath,
-          });
-          pdfBuffer = built.buffer;
-          pdfFilename = built.filename;
-        }
+        await sheets.spreadsheets.values.append({
+          spreadsheetId: process.env.GOOGLE_SHEETS_COMPLAINTS_ID,
+          range: "_triggers", // A special sheet for triggering Apps Script functions
+          valueInputOption: "RAW",
+          requestBody: {
+            values: [
+              [
+                "CLOSE_COMPLAINT",
+                mergedClose.id,
+                mergedClose.principalReview?.justified ? "true" : "false",
+                mergedClose.principalReview?.summary || "",
+                principalName,
+                principalRole,
+                departmentName,
+                new Date().toISOString(),
+              ],
+            ],
+          },
+        });
       } catch (e) {
-        console.error("PDF build failed (will send without attachment):", e);
+        console.error("Failed to trigger Apps Script:", e);
       }
 
       const ticketUrl = appLink(`/complaints/${mergedClose.id}`);
@@ -152,9 +146,7 @@ export async function closeComplaintFlow(params: {
         mergedClose.principalReview?.justified
           ? "החלטה: הפנייה הוכרה כמוצדקת."
           : "החלטה: הפנייה לא הוכרה כמוצדקת.",
-        pdfBuffer
-          ? "מצורף קובץ PDF עם פירוט מלא, כולל סיכום מנהל/ת בית הספר."
-          : "שימו לב: אירעה תקלה ביצירת קובץ ה-PDF. פרטי הסיכום זמינים במערכת.",
+        "סיכום הטיפול בפנייתך יישלח בהודעה נפרדת מהמערכת.",
         `לצפייה בפנייה במערכת: ${ticketUrl}`,
       ];
 
@@ -168,30 +160,15 @@ export async function closeComplaintFlow(params: {
         extraHtml: renderParagraphsHtml(lines),
       });
 
-      const attachments: Mail.Attachment[] = [logoCidAttachment() as unknown as Mail.Attachment];
-      if (pdfBuffer && pdfFilename) {
-        attachments.push({ filename: pdfFilename, content: pdfBuffer } as Mail.Attachment);
-      }
-
       try {
         await sendMail({
           to: reporterEmail,
           subject: `סיכום טיפול בפנייה: ${mergedClose.title} (#${mergedClose.id})`,
           html,
-          attachments,
         });
         emailed = true;
       } catch (e) {
         console.error("Failed to send reporter email:", e);
-      }
-
-      // Best-effort: upload PDF to Drive folder if configured
-      try {
-        if (pdfBuffer && pdfFilename && DRIVE_FOLDER_ID) {
-          await uploadPdfToDrive({ buffer: pdfBuffer, filename: pdfFilename, folderId: DRIVE_FOLDER_ID });
-        }
-      } catch (e) {
-        console.warn("Drive upload failed:", e);
       }
     } else {
       console.warn("Reporter email missing/invalid; skipping send.");
@@ -202,5 +179,3 @@ export async function closeComplaintFlow(params: {
 
   return { ok: true, emailed } as const;
 }
-
-
