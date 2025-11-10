@@ -18,6 +18,7 @@ export const COMPLAINTS_HEADER_AR = [
   "id",
   "createdAt",
   "updatedAt",
+  "subject",
   "title",
   "body",
   "status",
@@ -50,37 +51,45 @@ function pj<T>(s: string | undefined, fallback: T): T {
 export function rowToComplaint(row: string[]): Complaint | null {
   if (!row?.length) return null;
 
-  const reporterType = (row[9] ||
+  const reporterType = (row[10] ||
     "PARENT_STUDENT") as Complaint["reporter"]["type"];
 
   const reporter =
     reporterType === "STAFF"
       ? {
           type: "STAFF" as const,
-          fullName: row[10] || "",
-          email: row[11] || "",
-          phone: row[12] || "",
-          jobTitle: row[13] || "",
-          departmentId: row[14] || "",
+          fullName: row[11] || "",
+          email: row[12] || "",
+          phone: row[13] || "",
+          jobTitle: row[14] || "",
+          departmentId: row[15] || "",
         }
       : {
           type: "PARENT_STUDENT" as const,
-          fullName: row[10] || "",
-          email: row[11] || "",
-          phone: row[12] || "",
-          grade: row[15] || "",
-          classNumber: row[16] || "",
+          fullName: row[11] || "",
+          email: row[12] || "",
+          phone: row[13] || "",
+          grade: row[16] || "",
+          classNumber: row[17] || "",
         };
 
-  const messages = pj<ComplaintMessage[]>(row[17], []);
-  const returnInfo = pj<ReturnInfo | null>(row[18], null);
-  const principalReview = pj<Complaint["principalReview"]>(row[19], null);
+  const messages = pj<ComplaintMessage[]>(row[18], []);
+  const parsedAssigneeLetter = pj<AssigneeLetter | undefined>(
+    row[19],
+    undefined
+  );
+  const returnInfo = pj<ReturnInfo | null>(row[20], null);
+  const parsedReviewCycles = pj<ReviewCycle[] | undefined>(row[21], undefined);
+  const principalReview = pj<Complaint["principalReview"]>(row[22], null);
+  const parsedNotificationEmail = pj<Complaint["notificationEmail"]>(
+    row[23],
+    undefined
+  );
 
-  // Derive assigneeLetter from messages if present: prefer the latest message
-  // authored by the assigneeUserId (column H / index 7).
-  const assigneeUserId = row[7] || "";
-  let assigneeLetter: AssigneeLetter | undefined = undefined;
-  if (assigneeUserId) {
+  // Derive assigneeLetter from messages if parsedAssigneeLetter is not present
+  const assigneeUserId = row[8] || "";
+  let assigneeLetter = parsedAssigneeLetter;
+  if (!assigneeLetter && assigneeUserId) {
     const byAssignee = messages
       .filter((m) => m.authorId === assigneeUserId)
       .sort(
@@ -104,24 +113,20 @@ export function rowToComplaint(row: string[]): Complaint | null {
     id: row[0],
     createdAt: row[1],
     updatedAt: row[2] || row[1],
-    title: row[3],
-    body: row[4] || "",
-    status: row[5] as Complaint["status"],
-    departmentId: row[6] || "",
-    assigneeUserId: row[7] || null,
-    createdById: row[8] || null,
+    subject: row[3] || "",
+    title: row[4] || "",
+    body: row[5] || "",
+    status: row[6] as Complaint["status"],
+    departmentId: row[7] || "",
+    assigneeUserId: row[8] || null,
+    createdById: row[9] || null,
     reporter,
     messages,
-    returnInfo,
-    principalReview,
-    // Optional/undeclared columns in sheet remain undefined/null
-    // but derive a best-effort assignee letter from messagesJSON so the UI
-    // can show and edit the last letter written by the assignee.
     assigneeLetter,
-    // returnInfo is stored in column S as JSON (if present)
-    // keep reviewCycles undefined for now
-    reviewCycles: undefined as unknown as ReviewCycle[] | undefined,
-    notificationEmail: undefined,
+    returnInfo,
+    reviewCycles: parsedReviewCycles,
+    principalReview,
+    notificationEmail: parsedNotificationEmail,
   };
 }
 
@@ -144,6 +149,7 @@ export function complaintToRow(c: Complaint): (string | number | boolean)[] {
     c.id,
     c.createdAt,
     c.updatedAt,
+    c.subject,
     c.title,
     c.body,
     c.status,
@@ -159,7 +165,10 @@ export function complaintToRow(c: Complaint): (string | number | boolean)[] {
     reporterGrade,
     reporterClassNumber,
     JSON.stringify(c.messages ?? []),
+    JSON.stringify(c.assigneeLetter ?? null),
     JSON.stringify(c.returnInfo ?? null),
+    JSON.stringify(c.reviewCycles ?? null),
     JSON.stringify(c.principalReview ?? null),
+    JSON.stringify(c.notificationEmail ?? null),
   ];
 }

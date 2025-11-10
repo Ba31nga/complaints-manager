@@ -95,6 +95,7 @@ export type ReturnInfo = {
 
 export type Complaint = {
   id: string;
+  subject: string;
   title: string;
   body: string;
   status: ComplaintStatus;
@@ -123,6 +124,7 @@ export type Complaint = {
 };
 
 export type NewComplaintInput = {
+  subject: string;
   title: string;
   body: string;
   departmentId: string;
