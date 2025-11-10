@@ -102,19 +102,28 @@ export async function notifyOnComplaintPatch(args: {
     const nextId = String(merged.assigneeUserId || "").trim();
     if (prevId && prevId !== nextId && prevAssignee) {
       const email = pickUserEmail(prevAssignee);
-      const lines = [
-        `${prevAssignee.name}, פנייה שהייתה משויכת אליך הועברה למטפל/ת אחר/ת.`,
-      ];
+      // If there is no next assignee, the previous assignee was removed/unassigned.
+      const wasRemoved = !nextId;
+      const lines = wasRemoved
+        ? [
+            `${prevAssignee.name}, הפנייה שהייתה משויכת אליך הוסרה/נטרקה מהמשימות שלך.`,
+          ]
+        : [
+            `${prevAssignee.name}, פנייה שהייתה משויכת אליך הועברה למטפל/ת אחר/ת.`,
+          ];
       const html = renderTicketEmail({
         url: ticketUrl,
         title: merged.title,
         departmentName,
         createdAtISO: new Date().toISOString(),
-        headline: "פנייה הועברה ממך",
-        badgeText: "הועבר",
+        headline: wasRemoved ? "פנייה הוסרה ממך" : "פנייה הועברה ממך",
+        badgeText: wasRemoved ? "הוסרה" : "הועבר",
         extraHtml: renderParagraphsHtml(lines),
       });
-      await sendSafe(email, `פנייה הועברה ממך (#${merged.id})`, html);
+      const subject = wasRemoved
+        ? `פנייה הוסרה ממך (#${merged.id})`
+        : `פנייה הועברה ממך (#${merged.id})`;
+      await sendSafe(email, subject, html);
     }
   }
 
@@ -163,6 +172,31 @@ export async function notifyOnComplaintPatch(args: {
         extraHtml: renderParagraphsHtml(lines),
       });
       await sendSafe(email, `פנייה שויכה עבורך (#${merged.id})`, html);
+    }
+  }
+
+  // 4) Returned for editing by administrator (returnInfo added/updated)
+  // When an admin returns the complaint the UI writes `returnInfo` and sets status to IN_PROGRESS.
+  // Notify the current assignee that the complaint was returned for editing with the provided reason.
+  if (changes.includes("returnInfo")) {
+    const assignee = findUserById(merged.assigneeUserId);
+    if (assignee) {
+      const email = pickUserEmail(assignee);
+      const reason = merged.returnInfo?.reason || "";
+      const lines = [
+        `${assignee.name}, פנייה הוחזרה לעריכה על ידי מנהל/ת בית הספר.`,
+      ];
+      if (reason) lines.push(`סיבת החזרה: ${reason}`);
+      const html = renderTicketEmail({
+        url: ticketUrl,
+        title: merged.title,
+        departmentName,
+        createdAtISO: merged.updatedAt || new Date().toISOString(),
+        headline: "הוחזרה לעריכה",
+        badgeText: "הוחזרה",
+        extraHtml: renderParagraphsHtml(lines),
+      });
+      await sendSafe(email, `פנייה הוחזרה לעריכה (#${merged.id})`, html);
     }
   }
 
