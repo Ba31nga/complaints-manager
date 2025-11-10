@@ -149,26 +149,7 @@ export default function OpenComplaintsPage() {
     return () => clearTimeout(t);
   }, [q]);
 
-  // Keep viewer in sync if role/user/department is overridden elsewhere (optional)
-  useEffect(() => {
-    const onStorage = (e: StorageEvent) => {
-      if (!["role", "userId", "departmentId"].includes(e.key ?? "")) return;
-      const current =
-        users.find((u) => u.id === (localStorage.getItem("userId") || "")) ??
-        null;
-      if (current) {
-        setViewer({
-          userId: current.id,
-          role: ((localStorage.getItem("role") as Role | null) ??
-            current.role) as Role,
-          departmentId:
-            localStorage.getItem("departmentId") ?? current.departmentId,
-        });
-      }
-    };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, [users]);
+  // No need for local storage sync anymore as we only use NextAuth session
 
   const filtered = useMemo((): Complaint[] => {
     if (!viewer) return [];

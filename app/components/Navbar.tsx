@@ -18,46 +18,35 @@ export default function Navbar() {
   const { data: session } = useSession();
   const [open, setOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const [role, setRole] = useState<Role>("EMPLOYEE");
-  const [sheetName, setSheetName] = useState<string | null>(null);
+  // Get role from session
+  const sessionRole = (session?.user as { role?: string } | undefined)?.role;
+  const role =
+    sessionRole &&
+    ["EMPLOYEE", "MANAGER", "ADMIN", "PRINCIPAL"].includes(sessionRole)
+      ? (sessionRole as Role)
+      : "EMPLOYEE";
 
-  // Prefer NextAuth session role; fallback to localStorage for mock/dev
-  useEffect(() => {
-    const sessionRole = (session?.user as { role?: string } | undefined)?.role;
-    if (
-      sessionRole &&
-      ["EMPLOYEE", "MANAGER", "ADMIN", "PRINCIPAL"].includes(sessionRole)
-    ) {
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-      setRole(sessionRole as Role);
-      return;
-    }
-    const stored = (localStorage.getItem("role") as Role | null) ?? "EMPLOYEE";
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setRole(stored);
-  }, [session?.user]);
+  const [sheetName, setSheetName] = useState<string | null>(null);
 
   // Resolve display name from Users sheet by email
   useEffect(() => {
-    const email = session?.user?.email || "";
-    if (!email) {
-      setSheetName(null);
-      return;
-    }
+    const email = session?.user?.email;
+    if (!email) return;
+
     const ctrl = new AbortController();
-    (async () => {
-      try {
-        const res = await fetch(
-          `/api/users/by-email?email=${encodeURIComponent(email)}`,
-          { cache: "no-store", signal: ctrl.signal }
-        );
+    fetch(`/api/users/by-email?email=${encodeURIComponent(email)}`, {
+      cache: "no-store",
+      signal: ctrl.signal,
+    })
+      .then(async (res) => {
         if (!res.ok) return;
         const { data } = (await res.json()) as {
           data: { name?: string } | null;
         };
         setSheetName((data?.name || "").trim() || null);
-      } catch {}
-    })();
+      })
+      .catch(() => {});
+
     return () => ctrl.abort();
   }, [session?.user?.email]);
 
