@@ -1,9 +1,15 @@
-import { readComplaintsRaw, getSheets, COMPLAINTS_SHEET_ID } from "@/app/lib/sheets";
+import {
+  readComplaintsRaw,
+  getSheets,
+  COMPLAINTS_SHEET_ID,
+} from "@/app/lib/sheets";
 import { COMPLAINTS_HEADER_AR } from "@/app/lib/mappers/complaints";
 import { config } from "@/app/lib/config";
 
 export type ParamsObj = { id: string };
-export type CtxMaybePromise = { params: ParamsObj } | { params: Promise<ParamsObj> };
+export type CtxMaybePromise =
+  | { params: ParamsObj }
+  | { params: Promise<ParamsObj> };
 
 function isPromise<T>(v: unknown): v is Promise<T> {
   return !!v && typeof (v as { then?: unknown }).then === "function";
@@ -19,7 +25,8 @@ export async function getAllComplaintRows(): Promise<string[][]> {
 }
 
 export function locateComplaintRow(values: string[][], wantedId: string) {
-  const hasHeader = values.length > 0 && (values[0][0] || "").toLowerCase() === "id";
+  const hasHeader =
+    values.length > 0 && (values[0][0] || "").toLowerCase() === "id";
   const headerOffset = hasHeader ? 1 : 0;
   const rows = values.slice(headerOffset);
 
@@ -32,18 +39,30 @@ export function locateComplaintRow(values: string[][], wantedId: string) {
       break;
     }
   }
-  return { hasHeader, headerOffset, a1RowNumber: rowIdx, row: foundRow, rows } as const;
+  return {
+    hasHeader,
+    headerOffset,
+    a1RowNumber: rowIdx,
+    row: foundRow,
+    rows,
+  } as const;
 }
 
 export function complaintsTabName(): string {
   return config.GOOGLE_COMPLAINTS_TAB || "database";
 }
 
-export async function updateComplaintRow(a1RowNumber: number, row: (string | number | boolean)[]) {
+export async function updateComplaintRow(
+  a1RowNumber: number,
+  row: (string | number | boolean)[]
+) {
   const TAB = complaintsTabName();
-  if (!COMPLAINTS_SHEET_ID) throw new Error("Missing GOOGLE_SHEETS_COMPLAINTS_ID");
-  // Compute end column from header length (e.g. 19 -> S, 20 -> T)
-  const totalCols = COMPLAINTS_HEADER_AR.length;
+  if (!COMPLAINTS_SHEET_ID)
+    throw new Error("Missing GOOGLE_SHEETS_COMPLAINTS_ID");
+  // Compute end column from the larger of header length and provided row length.
+  // This prevents a mismatch when the in-memory row contains more columns
+  // than the header constant (for example, new JSON columns added later).
+  const totalCols = Math.max(COMPLAINTS_HEADER_AR.length, row.length);
   const endCol = a1ColumnLetter(totalCols);
   const a1 = `${TAB}!A${a1RowNumber}:${endCol}${a1RowNumber}`;
   const sheetsRW = getSheets("rw");
@@ -66,5 +85,3 @@ function a1ColumnLetter(n: number): string {
   }
   return res;
 }
-
-
