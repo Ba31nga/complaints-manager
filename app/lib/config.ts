@@ -19,6 +19,9 @@ const EnvSchema = z.object({
 
   GOOGLE_DRIVE_FOLDER_ID: z.string().optional(),
   GOOGLE_DOCS_TEMPLATE_ID: z.string().optional(),
+
+  GOOGLE_FORM_ID: z.string().optional(),
+  entryID: z.string().optional(),
 });
 
 function normalizePrivateKey(key: string) {
@@ -46,6 +49,9 @@ const raw = {
 
   GOOGLE_DRIVE_FOLDER_ID: process.env.GOOGLE_DRIVE_FOLDER_ID,
   GOOGLE_DOCS_TEMPLATE_ID: process.env.GOOGLE_DOCS_TEMPLATE_ID,
+
+  GOOGLE_FORM_ID: process.env.GOOGLE_FORM_ID,
+  entryID: process.env.entryID,
 };
 
 export const config = EnvSchema.parse(raw);

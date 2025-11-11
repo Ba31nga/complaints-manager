@@ -14,7 +14,8 @@ export async function middleware(req: NextRequest) {
     pathname.startsWith("/assets") ||
     pathname.endsWith(".ico") ||
     pathname === "/robots.txt" ||
-    pathname === "/sitemap.xml";
+    pathname === "/sitemap.xml" ||
+    pathname === "/api/form-test"; // Allow form test endpoint
 
   if (isPublic) return NextResponse.next();
 
