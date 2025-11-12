@@ -183,10 +183,10 @@ export async function readRolesRaw(): Promise<string[][]> {
   return readRange(USERS_SHEET_ID, `${ROLES_TAB}!A:A`, "ro");
 }
 
-/** Complaints: A..T (id..principalReviewJSON) in `database` tab */
+/** Complaints: A..X (id..notificationEmailJSON) in `database` tab */
 export async function readComplaintsRaw(): Promise<string[][]> {
   if (!COMPLAINTS_SHEET_ID)
     throw new Error("Missing GOOGLE_SHEETS_COMPLAINTS_ID");
-  // Expand range to include extra columns up to T (principalReviewJSON)
-  return readRange(COMPLAINTS_SHEET_ID, `${COMPLAINTS_TAB}!A:T`, "ro");
+  // Include columns up to X so returnInfoJSON/principalReview/notificationEmail are read
+  return readRange(COMPLAINTS_SHEET_ID, `${COMPLAINTS_TAB}!A:X`, "ro");
 }

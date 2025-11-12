@@ -157,6 +157,9 @@ export default function ComplaintDetailPage() {
 
   // NEW: blocking overlay state + helper
   const [blocking, setBlocking] = useState(false);
+
+  // NEW: messages dropdown state
+  const [messagesExpanded, setMessagesExpanded] = useState(false);
   async function withBlocking<T>(fn: () => Promise<T>) {
     try {
       setBlocking(true);
@@ -399,14 +402,14 @@ export default function ComplaintDetailPage() {
     setActionLoading(true);
     setErr(null);
     try {
-      const newMsg = {
-        id: makeId(),
-        authorId: viewer!.userId,
-        body,
-        createdAt: new Date().toISOString(),
-      };
-      const updatedMessages = [...(complaint.messages || []), newMsg];
-      await patchComplaint(complaint.id, { messages: updatedMessages });
+      // Only update assigneeLetter, don't add to messages yet
+      await patchComplaint(complaint.id, {
+        assigneeLetter: {
+          body,
+          authorUserId: viewer!.userId,
+          updatedAt: new Date().toISOString(),
+        },
+      });
       await refetchComplaint();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -423,6 +426,7 @@ export default function ComplaintDetailPage() {
     setActionLoading(true);
     setErr(null);
     try {
+      // Create message only when submitting to principal
       const newMsg = {
         id: makeId(),
         authorId: viewer!.userId,
@@ -430,10 +434,18 @@ export default function ComplaintDetailPage() {
         createdAt: new Date().toISOString(),
       };
       const updatedMessages = [...(complaint.messages || []), newMsg];
+      // Update assigneeLetter, add to messages, and change status
       await patchComplaint(complaint.id, {
+        assigneeLetter: {
+          body,
+          authorUserId: viewer!.userId,
+          updatedAt: new Date().toISOString(),
+          submittedAt: new Date().toISOString(),
+        },
         messages: updatedMessages,
         status: "AWAITING_PRINCIPAL_REVIEW",
       });
+      setEmployeeDraft("");
       await refetchComplaint();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -491,6 +503,7 @@ export default function ComplaintDetailPage() {
         returnInfo: newReturnInfo,
         status: "IN_PROGRESS",
       });
+      setReturnReason("");
       await refetchComplaint();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -565,169 +578,419 @@ export default function ComplaintDetailPage() {
       <div className="grid gap-6 lg:grid-cols-[1fr,360px]">
         {/* Main */}
         <div className="space-y-4">
+          {/* Complaint Details - shown to all */}
           <Card>
             <h2 className="mb-2 text-sm font-semibold">פרטי הפנייה</h2>
-            <p className="whitespace-pre-wrap text-sm leading-6 text-neutral-800 dark:text-neutral-200">
+            <p className="whitespace-pre-wrap text-sm leading-6">
               {complaint.body}
             </p>
           </Card>
 
-          {complaint.returnInfo &&
-            (displayStatus === "IN_PROGRESS" ||
-              displayStatus === "ASSIGNED") && (
-              <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm dark:border-amber-900/50 dark:bg-amber-900/20">
-                <div className="font-medium mb-1">
-                  הוחזר לעריכה על ידי מנהל/ת בית הספר
+          {/* Return info alert removed (inline indicator used instead) */}
+
+          {/* EMPLOYEE / MANAGER WORKFLOW */}
+          {(viewer.role === "EMPLOYEE" || viewer.role === "MANAGER") && (
+            <>
+              {/* Employee Message Editor */}
+              <Card className="relative">
+                <div className="mb-3 flex items-center justify-between relative">
+                  <h3 className="text-sm font-semibold">מכתב המטפל/ת</h3>
+                  {displayStatus === "AWAITING_PRINCIPAL_REVIEW" && (
+                    <span className="text-xs font-medium px-2 py-1 rounded border border-gray-300 dark:border-neutral-600 bg-gray-100 dark:bg-neutral-800">
+                      הוגש לאישור
+                    </span>
+                  )}
+                  {complaint.returnInfo && isInProgress && canWriteHere && (
+                    <div className="group relative mr-2">
+                      <button
+                        type="button"
+                        className="w-6 h-6 flex items-center justify-center rounded-full bg-yellow-400 text-yellow-900 font-bold text-sm hover:bg-yellow-500 transition-colors cursor-help"
+                        aria-label="סיבת החזרה"
+                      >
+                        !
+                      </button>
+                      <div className="absolute -left-56 top-8 hidden group-hover:block bg-yellow-100 dark:bg-yellow-900/30 border border-yellow-300 dark:border-yellow-700 rounded-lg p-2 text-xs text-yellow-900 dark:text-yellow-100 w-56 shadow-lg z-50 text-right">
+                        <div className="font-semibold mb-1">סיבת החזרה:</div>
+                        <div className="whitespace-pre-wrap">
+                          {complaint.returnInfo.reason}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
-                <div className="text-amber-800 dark:text-amber-200 whitespace-pre-wrap">
-                  {complaint.returnInfo.reason}
-                </div>
-              </div>
-            )}
 
-          <section className="card">
-            <div className="mb-2 flex items-center justify-between">
-              <h3 className="text-sm font-semibold">מכתב המטפל/ת</h3>
-              {displayStatus === "AWAITING_PRINCIPAL_REVIEW" && (
-                <span className="text-[11px] text-neutral-500">
-                  הוגש לאישור מנהל/ת בית הספר
-                </span>
-              )}
-            </div>
-
-            <textarea
-              className={`w-full resize-y rounded-lg border px-3 py-2 text-sm outline-none dark:border-neutral-800 ${
-                isAwaitingPrincipal
-                  ? "opacity-60 cursor-not-allowed bg-neutral-100 dark:bg-neutral-900/20"
-                  : "dark:bg-neutral-900"
-              }`}
-              rows={8}
-              placeholder="כתוב/כתבי כאן מכתב מפורט לפונה (ללא דיאלוג פנימי)."
-              value={employeeDraft}
-              onChange={(e) => setEmployeeDraft(e.target.value)}
-              disabled={
-                !canWriteHere || !isAssigned || isClosed || isAwaitingPrincipal
-              }
-            />
-
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button
-                className={`btn-primary ${actionLoading ? "opacity-70" : ""} ${
-                  isAwaitingPrincipal ? "opacity-60 cursor-not-allowed" : ""
-                }`}
-                onClick={onSaveAssigneeLetter}
-                disabled={
-                  actionLoading ||
-                  !canWriteHere ||
-                  !isAssigned ||
-                  !employeeDraft.trim() ||
-                  isClosed ||
-                  isAwaitingPrincipal
-                }
-              >
-                שמור מכתב
-              </button>
-              <button
-                className={`btn-ghost ${actionLoading ? "opacity-70" : ""} ${
-                  isAwaitingPrincipal ? "opacity-60 cursor-not-allowed" : ""
-                }`}
-                onClick={onSubmitToPrincipal}
-                disabled={
-                  actionLoading ||
-                  !canWriteHere ||
-                  !isAssigned ||
-                  !employeeDraft.trim() ||
-                  isClosed ||
-                  isAwaitingPrincipal
-                }
-              >
-                סיימתי טיפול — העבר לאישור מנהל/ת בית הספר
-              </button>
-            </div>
-          </section>
-
-          <Card>
-            <h3 className="mb-3 text-sm font-semibold">
-              אישור מנהל/ת בית הספר / החזרה לעריכה
-            </h3>
-
-            <fieldset disabled={!canPrincipalRespond || isClosed}>
-              {!hasEmployeeLetter &&
-                displayStatus === "AWAITING_PRINCIPAL_REVIEW" && (
-                  <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[13px] dark:border-amber-900/40 dark:bg-amber-900/20">
-                    אין מכתב מטפל/ת שמור. לא ניתן לאשר או להחזיר עד שהמטפל/ת
-                    יכתוב/תשמור מכתב.
-                  </div>
-                )}
-
-              <div className="mb-3 flex gap-4 text-sm">
-                <label className="inline-flex items-center gap-2">
-                  <input
-                    type="radio"
-                    checked={principalJust === true}
-                    onChange={() => setPrincipalJust(true)}
-                  />{" "}
-                  מוצדקת
-                </label>
-                <label className="inline-flex items-center gap-2">
-                  <input
-                    type="radio"
-                    checked={principalJust === false}
-                    onChange={() => setPrincipalJust(false)}
-                  />{" "}
-                  לא מוצדקת
-                </label>
-              </div>
-
-              <textarea
-                className="mb-2 w-full resize-y rounded-lg border px-3 py-2 text-sm outline-none dark:border-neutral-800 dark:bg-neutral-900"
-                rows={6}
-                placeholder="סיכום מנהל/ת בית הספר (ייכלל במייל הסגירה לפונה)."
-                value={principalDraft}
-                onChange={(e) => setPrincipalDraft(e.target.value)}
-              />
-
-              <div className="mt-4 panel text-sm">
-                <div className="mb-2 font-medium">החזרה לעריכה אצל המטפל/ת</div>
-                <textarea
-                  className="w-full resize-y rounded-lg border px-3 py-2 text-sm outline-none dark:border-neutral-800 dark:bg-neutral-900"
-                  rows={3}
-                  placeholder="סיבה קצרה להחזרה (תוצג למטפל/ת)"
-                  value={returnReason}
-                  onChange={(e) => setReturnReason(e.target.value)}
-                />
-                <div className="mt-2 flex justify-end gap-2">
-                  <button
-                    className={`btn-ghost ${actionLoading ? "opacity-70" : ""}`}
-                    onClick={onPrincipalReturn}
+                <div>
+                  <textarea
+                    className={`w-full resize-y rounded-lg border px-3 py-2 text-sm outline-none transition-all ${
+                      isAwaitingPrincipal
+                        ? "opacity-60 cursor-not-allowed bg-gray-100 dark:bg-neutral-800/30 border-gray-300 dark:border-neutral-700"
+                        : "border-gray-300 dark:border-neutral-700 dark:bg-neutral-900 focus:ring-2 focus:ring-black dark:focus:ring-white"
+                    }`}
+                    rows={8}
+                    placeholder="כתוב/כתבי כאן מכתב מפורט לפונה (ללא דיאלוג פנימי)."
+                    value={employeeDraft}
+                    onChange={(e) => setEmployeeDraft(e.target.value)}
                     disabled={
-                      actionLoading ||
-                      !returnReason.trim() ||
-                      !canPrincipalRespond
+                      !canWriteHere ||
+                      !isAssigned ||
+                      isClosed ||
+                      isAwaitingPrincipal
                     }
-                    type="button"
-                  >
-                    החזר לעריכה
-                  </button>
+                  />
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2">
                   <button
                     className={`btn-primary ${
-                      actionLoading ? "opacity-70" : ""
+                      !canWriteHere ||
+                      !isAssigned ||
+                      !employeeDraft.trim() ||
+                      isClosed ||
+                      isAwaitingPrincipal ||
+                      actionLoading
+                        ? "opacity-50 cursor-not-allowed"
+                        : ""
                     }`}
-                    onClick={onPrincipalClose}
+                    onClick={onSaveAssigneeLetter}
                     disabled={
                       actionLoading ||
-                      !canPrincipalRespond ||
-                      principalJust === null ||
-                      !principalDraft.trim()
+                      !canWriteHere ||
+                      !isAssigned ||
+                      !employeeDraft.trim() ||
+                      isClosed ||
+                      isAwaitingPrincipal
                     }
-                    type="button"
                   >
-                    שלח מייל סיכום וסגור
+                    שמור מכתב
+                  </button>
+                  <button
+                    className={`btn-ghost ${
+                      !canWriteHere ||
+                      !isAssigned ||
+                      !employeeDraft.trim() ||
+                      isClosed ||
+                      isAwaitingPrincipal ||
+                      actionLoading
+                        ? "opacity-50 cursor-not-allowed"
+                        : ""
+                    }`}
+                    onClick={onSubmitToPrincipal}
+                    disabled={
+                      actionLoading ||
+                      !canWriteHere ||
+                      !isAssigned ||
+                      !employeeDraft.trim() ||
+                      isClosed ||
+                      isAwaitingPrincipal
+                    }
+                  >
+                    סיימתי טיפול — העבר לאישור
                   </button>
                 </div>
-              </div>
-            </fieldset>
-          </Card>
+                {/* debug removed */}
+              </Card>
+
+              {/* Messages History Dropdown */}
+              {complaint.messages && complaint.messages.length > 0 && (
+                <Card>
+                  <button
+                    onClick={() => setMessagesExpanded(!messagesExpanded)}
+                    className="w-full flex items-center justify-between text-sm font-semibold hover:opacity-70 transition-opacity"
+                  >
+                    <span>היסטוריית הודעות ({complaint.messages.length})</span>
+                    <svg
+                      className={`w-4 h-4 transition-transform ${
+                        messagesExpanded ? "rotate-180" : ""
+                      }`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M19 14l-7 7m0 0l-7-7m7 7V3"
+                      />
+                    </svg>
+                  </button>
+
+                  {messagesExpanded && (
+                    <div className="mt-3 space-y-2 max-h-96 overflow-y-auto">
+                      {complaint.messages.map((msg) => {
+                        const author = users.find((u) => u.id === msg.authorId);
+                        const isReturn = msg.body.startsWith("__RETURN__:");
+                        const returnReason = isReturn
+                          ? msg.body.slice("__RETURN__:".length)
+                          : null;
+
+                        return (
+                          <div
+                            key={msg.id}
+                            className={`rounded-lg p-3 text-sm border ${
+                              isReturn
+                                ? "bg-gray-100 border-gray-300 dark:bg-neutral-800/50 dark:border-neutral-700"
+                                : "bg-white border-gray-200 dark:bg-neutral-900 dark:border-neutral-700"
+                            }`}
+                          >
+                            <div className="flex justify-between items-start mb-2">
+                              <span className="font-medium">
+                                {author?.name || "לא ידוע"}
+                              </span>
+                              <span className="text-xs muted">
+                                {new Date(msg.createdAt).toLocaleString(
+                                  "he-IL"
+                                )}
+                              </span>
+                            </div>
+                            {isReturn && (
+                              <div className="text-xs font-semibold mb-1 muted">
+                                החזרה לעריכה:
+                              </div>
+                            )}
+                            <p className="whitespace-pre-wrap">
+                              {isReturn ? returnReason : msg.body}
+                            </p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </Card>
+              )}
+            </>
+          )}
+
+          {/* PRINCIPAL / ADMIN REVIEW SECTION */}
+          {(viewer.role === "PRINCIPAL" || viewer.role === "ADMIN") && (
+            <>
+              {/* Employee's Letter Display */}
+              {hasEmployeeLetter && (
+                <Card>
+                  <h3 className="mb-3 text-sm font-semibold">מכתב המטפל/ת</h3>
+                  {isInProgress && (
+                    <div className="text-sm text-neutral-600 dark:text-neutral-400">
+                      <span className="dot-wave">.</span>
+                      <span
+                        className="dot-wave"
+                        style={{ animationDelay: "0.1s" }}
+                      >
+                        .
+                      </span>
+                      <span
+                        className="dot-wave"
+                        style={{ animationDelay: "0.2s" }}
+                      >
+                        .
+                      </span>
+                    </div>
+                  )}
+                  {!isInProgress && (
+                    <p className="text-sm whitespace-pre-wrap leading-relaxed">
+                      {complaint.assigneeLetter?.body}
+                    </p>
+                  )}
+                </Card>
+              )}
+
+              {!hasEmployeeLetter &&
+                displayStatus === "AWAITING_PRINCIPAL_REVIEW" && (
+                  <Card>
+                    <div className="text-sm">
+                      אין מכתב מטפל/ת שמור. לא ניתן לאשר או להחזיר עד שהמטפל/ת
+                      יכתוב/תשמור מכתב.
+                    </div>
+                  </Card>
+                )}
+
+              {/* Messages History Dropdown for Principal/Admin */}
+              {complaint.messages && complaint.messages.length > 0 && (
+                <Card>
+                  <button
+                    onClick={() => setMessagesExpanded(!messagesExpanded)}
+                    className="w-full flex items-center justify-between text-sm font-semibold hover:opacity-70 transition-opacity"
+                  >
+                    <span>היסטוריית הודעות ({complaint.messages.length})</span>
+                    <svg
+                      className={`w-4 h-4 transition-transform ${
+                        messagesExpanded ? "rotate-180" : ""
+                      }`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M19 14l-7 7m0 0l-7-7m7 7V3"
+                      />
+                    </svg>
+                  </button>
+
+                  {messagesExpanded && (
+                    <div className="mt-3 space-y-2 max-h-96 overflow-y-auto">
+                      {complaint.messages.map((msg) => {
+                        const author = users.find((u) => u.id === msg.authorId);
+                        const isReturn = msg.body.startsWith("__RETURN__:");
+                        const returnReason = isReturn
+                          ? msg.body.slice("__RETURN__:".length)
+                          : null;
+
+                        return (
+                          <div
+                            key={msg.id}
+                            className={`rounded-lg p-3 text-sm border ${
+                              isReturn
+                                ? "bg-gray-100 border-gray-300 dark:bg-neutral-800/50 dark:border-neutral-700"
+                                : "bg-white border-gray-200 dark:bg-neutral-900 dark:border-neutral-700"
+                            }`}
+                          >
+                            <div className="flex justify-between items-start mb-2">
+                              <span className="font-medium">
+                                {author?.name || "לא ידוע"}
+                              </span>
+                              <span className="text-xs muted">
+                                {new Date(msg.createdAt).toLocaleString(
+                                  "he-IL"
+                                )}
+                              </span>
+                            </div>
+                            {isReturn && (
+                              <div className="text-xs font-semibold mb-1 muted">
+                                החזרה לעריכה:
+                              </div>
+                            )}
+                            <p className="whitespace-pre-wrap">
+                              {isReturn ? returnReason : msg.body}
+                            </p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </Card>
+              )}
+
+              {/* Return to Editor Section */}
+              <Card>
+                <div className="mb-3">
+                  <h4 className="text-sm font-semibold mb-2">
+                    החזרה לעריכה אצל המטפל/ת
+                  </h4>
+                  <p className="text-xs muted mb-3">
+                    בחר/י אפשרות זו אם ברצונך להחזיר את הפנייה למטפל/ת לעריכה
+                    נוספת
+                  </p>
+                </div>
+
+                <fieldset disabled={!canPrincipalRespond || isClosed}>
+                  <textarea
+                    className="w-full resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none dark:border-neutral-700 dark:bg-neutral-900 focus:ring-2 focus:ring-black dark:focus:ring-white"
+                    rows={3}
+                    placeholder="הסבר/הסבירי מדוע מוחזרת הפנייה לעריכה..."
+                    value={returnReason}
+                    onChange={(e) => setReturnReason(e.target.value)}
+                  />
+                  <div className="mt-2 flex justify-end">
+                    <button
+                      className={`btn-ghost ${
+                        actionLoading ||
+                        !returnReason.trim() ||
+                        !canPrincipalRespond
+                          ? "opacity-50 cursor-not-allowed"
+                          : ""
+                      }`}
+                      onClick={onPrincipalReturn}
+                      disabled={
+                        actionLoading ||
+                        !returnReason.trim() ||
+                        !canPrincipalRespond
+                      }
+                      type="button"
+                    >
+                      החזר לעריכה
+                    </button>
+                  </div>
+                </fieldset>
+              </Card>
+
+              {/* Decision & Summary Section */}
+              <Card>
+                <h3 className="mb-4 text-sm font-semibold">
+                  החלטת מנהל/ת בית הספר
+                </h3>
+
+                <fieldset disabled={!canPrincipalRespond || isClosed}>
+                  <div className="mb-4">
+                    <label className="text-sm font-medium block mb-3">
+                      האם הפנייה מוצדקת?
+                    </label>
+                    <div className="flex gap-6">
+                      <label className="inline-flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="radio"
+                          checked={principalJust === true}
+                          onChange={() => setPrincipalJust(true)}
+                          className="w-4 h-4"
+                        />
+                        <span className="text-sm">כן - מוצדקת</span>
+                      </label>
+                      <label className="inline-flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="radio"
+                          checked={principalJust === false}
+                          onChange={() => setPrincipalJust(false)}
+                          className="w-4 h-4"
+                        />
+                        <span className="text-sm">לא - לא מוצדקת</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-medium block mb-2">
+                      סיכום ודעת המנהל/ת
+                    </label>
+                    <p className="text-xs muted mb-2">
+                      סיכום זה יישלח לפונה במייל הסגירה
+                    </p>
+                    <textarea
+                      className="w-full resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none dark:border-neutral-700 dark:bg-neutral-900 focus:ring-2 focus:ring-black dark:focus:ring-white"
+                      rows={5}
+                      placeholder="כתוב/כתבי את דעתך וסיכום ההחלטה..."
+                      value={principalDraft}
+                      onChange={(e) => setPrincipalDraft(e.target.value)}
+                    />
+                  </div>
+
+                  {/* Approve & Close Button */}
+                  <div className="mt-4 flex justify-end">
+                    <button
+                      className={`btn-primary ${
+                        actionLoading ||
+                        !canPrincipalRespond ||
+                        principalJust === null ||
+                        !principalDraft.trim()
+                          ? "opacity-50 cursor-not-allowed"
+                          : ""
+                      }`}
+                      onClick={onPrincipalClose}
+                      disabled={
+                        actionLoading ||
+                        !canPrincipalRespond ||
+                        principalJust === null ||
+                        !principalDraft.trim()
+                      }
+                      type="button"
+                    >
+                      אישור וסגירה
+                    </button>
+                  </div>
+                </fieldset>
+              </Card>
+            </>
+          )}
         </div>
 
         {/* Side panel */}
