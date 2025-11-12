@@ -305,13 +305,24 @@ export default function OpenComplaintsPage() {
               ? userById.get(c.assigneeUserId) ?? null
               : null;
 
+            // apply an urgency class to the whole card so it gets a colored
+            // blinking/pulsing background. Medium (rank===1) -> yellow,
+            // urgent/late (rank>=2) -> red.
+            const cardClass = `transition hover:shadow-md ${
+              meta.rank >= 2
+                ? "urgency-critical"
+                : meta.rank === 1
+                ? "urgency-warning"
+                : ""
+            }`;
+
             return (
               <Link
                 key={c.id}
                 href={`/complaints/${c.id}`}
                 aria-label={`פתח תלונה: ${c.title}`}
               >
-                <Card className={`transition hover:shadow-md`}>
+                <Card className={cardClass}>
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100 truncate">

@@ -55,7 +55,7 @@ export default function Navbar() {
     {
       href: "/",
       label: "תלונות פתוחות",
-      roles: ["EMPLOYEE", "MANAGER", "ADMIN", "PRINCIPAL"] as Role[],
+      roles: ["ADMIN", "PRINCIPAL"] as Role[],
     },
     {
       href: "/closed",
