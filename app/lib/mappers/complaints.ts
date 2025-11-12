@@ -8,11 +8,11 @@ import type {
 } from "@/app/lib/types";
 
 /**
- * database!A:T
- * A:id B:createdAt C:updatedAt D:title E:body F:status G:departmentId
- * H:assigneeUserId I:createdById J:reporterType K:reporterFullName L:reporterEmail M:reporterPhone
- * N:reporterJobTitle O:reporterDepartmentId P:reporterGrade Q:reporterClassNumber
- * R:messagesJSON S:returnInfoJSON T:principalReviewJSON
+ * database columns (sheet order):
+ * A:id B:createdAt C:updatedAt D:subject E:title F:body G:status H:departmentId
+ * I:assigneeUserId J:createdById K:reporterType L:reporterFullName M:reporterEmail N:reporterPhone
+ * O:reporterJobTitle P:reporterDepartmentId Q:reporterGrade R:reporterClassNumber
+ * S:messagesJSON T:assigneeLetterJSON U:returnInfoJSON V:reviewCyclesJSON W:principalReviewJSON X:notificationEmailJSON
  */
 export const COMPLAINTS_HEADER_AR = [
   "id",
@@ -34,8 +34,11 @@ export const COMPLAINTS_HEADER_AR = [
   "reporterGrade",
   "reporterClassNumber",
   "messagesJSON",
+  "assigneeLetterJSON",
   "returnInfoJSON",
+  "reviewCyclesJSON",
   "principalReviewJSON",
+  "notificationEmailJSON",
 ] as const;
 
 // ✅ Important: DO NOT put an optional param before a required one.
@@ -51,43 +54,54 @@ function pj<T>(s: string | undefined, fallback: T): T {
 export function rowToComplaint(row: string[]): Complaint | null {
   if (!row?.length) return null;
 
-  const reporterType = (row[10] ||
+  // Pad the row to the expected header length so missing trailing cells
+  // (Sheets API may omit empty trailing cells) don't shift indices.
+  const expectedCols = COMPLAINTS_HEADER_AR.length;
+  const cells = [...row, ...Array(expectedCols).fill("")].slice(
+    0,
+    expectedCols
+  );
+
+  const reporterType = (cells[10] ||
     "PARENT_STUDENT") as Complaint["reporter"]["type"];
 
   const reporter =
     reporterType === "STAFF"
       ? {
           type: "STAFF" as const,
-          fullName: row[11] || "",
-          email: row[12] || "",
-          phone: row[13] || "",
-          jobTitle: row[14] || "",
-          departmentId: row[15] || "",
+          fullName: cells[11] || "",
+          email: cells[12] || "",
+          phone: cells[13] || "",
+          jobTitle: cells[14] || "",
+          departmentId: cells[15] || "",
         }
       : {
           type: "PARENT_STUDENT" as const,
-          fullName: row[11] || "",
-          email: row[12] || "",
-          phone: row[13] || "",
-          grade: row[16] || "",
-          classNumber: row[17] || "",
+          fullName: cells[11] || "",
+          email: cells[12] || "",
+          phone: cells[13] || "",
+          grade: cells[16] || "",
+          classNumber: cells[17] || "",
         };
 
-  const messages = pj<ComplaintMessage[]>(row[18], []);
+  const messages = pj<ComplaintMessage[]>(cells[18], []);
   const parsedAssigneeLetter = pj<AssigneeLetter | undefined>(
-    row[19],
+    cells[19],
     undefined
   );
-  const returnInfo = pj<ReturnInfo | null>(row[20], null);
-  const parsedReviewCycles = pj<ReviewCycle[] | undefined>(row[21], undefined);
-  const principalReview = pj<Complaint["principalReview"]>(row[22], null);
+  const returnInfo = pj<ReturnInfo | null>(cells[20], null);
+  const parsedReviewCycles = pj<ReviewCycle[] | undefined>(
+    cells[21],
+    undefined
+  );
+  const principalReview = pj<Complaint["principalReview"]>(cells[22], null);
   const parsedNotificationEmail = pj<Complaint["notificationEmail"]>(
-    row[23],
+    cells[23],
     undefined
   );
 
   // Derive assigneeLetter from messages if parsedAssigneeLetter is not present
-  const assigneeUserId = row[8] || "";
+  const assigneeUserId = cells[8] || "";
   let assigneeLetter = parsedAssigneeLetter;
   if (!assigneeLetter && assigneeUserId) {
     const byAssignee = messages
@@ -165,10 +179,13 @@ export function complaintToRow(c: Complaint): (string | number | boolean)[] {
     reporterGrade,
     reporterClassNumber,
     JSON.stringify(c.messages ?? []),
-    JSON.stringify(c.assigneeLetter ?? null),
-    JSON.stringify(c.returnInfo ?? null),
-    JSON.stringify(c.reviewCycles ?? null),
-    JSON.stringify(c.principalReview ?? null),
-    JSON.stringify(c.notificationEmail ?? null),
+    // When a nullable JSON field is intentionally cleared (null), write an empty
+    // string to the sheet instead of the literal string "null". The sheets
+    // updater will then clear the cell contents.
+    c.assigneeLetter ? JSON.stringify(c.assigneeLetter) : "",
+    c.returnInfo ? JSON.stringify(c.returnInfo) : "",
+    c.reviewCycles ? JSON.stringify(c.reviewCycles) : "",
+    c.principalReview ? JSON.stringify(c.principalReview) : "",
+    c.notificationEmail ? JSON.stringify(c.notificationEmail) : "",
   ];
 }

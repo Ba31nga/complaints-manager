@@ -375,11 +375,28 @@ export default function ComplaintDetailPage() {
     if (!canChangeDeptHere || isClosed) return;
     await withBlocking(async () => {
       const newDeptId = deptId || ""; // allow clearing to "— ללא"
-      // When clearing department, also clear assignee on the server
-      await patchChangeDepartment(complaint.id, newDeptId || null);
-      if (!newDeptId && isAssigned) {
-        await patchAssign(complaint.id, null);
+      // If this change happens while the complaint is mid-progress, reset
+      // the workflow: set status back to OPEN, clear principal note and
+      // clear the current assignee letter, but keep messages.
+      const midProgress = isInProgress || isAwaitingPrincipal;
+
+      if (midProgress) {
+        await patchComplaint(complaint.id, {
+          departmentId: newDeptId || "",
+          assigneeUserId: null,
+          status: "OPEN",
+          principalReview: null,
+          assigneeLetter: null,
+          returnInfo: null,
+        });
+      } else {
+        // Regular change when not mid-progress: preserve existing behaviour
+        await patchChangeDepartment(complaint.id, newDeptId || null);
+        if (!newDeptId && isAssigned) {
+          await patchAssign(complaint.id, null);
+        }
       }
+
       await refetchComplaint();
     });
   };
@@ -388,7 +405,22 @@ export default function ComplaintDetailPage() {
     if (!hasDept) return; // cannot assign without department
     if (!(canAssignHere && !isClosed)) return;
     await withBlocking(async () => {
-      await patchAssign(complaint.id, userId || null);
+      const midProgress = isInProgress || isAwaitingPrincipal;
+
+      if (midProgress) {
+        // When reassigning mid-flow, reset status and clear principal note
+        // and assignee letter but preserve messages history.
+        await patchComplaint(complaint.id, {
+          assigneeUserId: userId || null,
+          status: "OPEN",
+          principalReview: null,
+          assigneeLetter: null,
+          returnInfo: null,
+        });
+      } else {
+        await patchAssign(complaint.id, userId || null);
+      }
+
       await refetchComplaint();
     });
   };
@@ -533,6 +565,13 @@ export default function ComplaintDetailPage() {
             <span className="inline-flex rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] dark:bg-neutral-800">
               {statusLabel[displayStatus]}
             </span>
+            {complaint.subject && (
+              <div className="mt-2">
+                <span className="inline-flex items-center rounded-full bg-neutral-100 px-2 py-0.5 text-sm font-medium text-neutral-800 dark:bg-neutral-800 dark:text-neutral-200">
+                  {complaint.subject}
+                </span>
+              </div>
+            )}
           </div>
           <p className="mt-1 text-xs text-neutral-600 dark:text-neutral-400">
             {nextHint}
@@ -581,6 +620,7 @@ export default function ComplaintDetailPage() {
           {/* Complaint Details - shown to all */}
           <Card>
             <h2 className="mb-2 text-sm font-semibold">פרטי הפנייה</h2>
+
             <p className="whitespace-pre-wrap text-sm leading-6">
               {complaint.body}
             </p>
@@ -764,12 +804,16 @@ export default function ComplaintDetailPage() {
           {/* PRINCIPAL / ADMIN REVIEW SECTION */}
           {(viewer.role === "PRINCIPAL" || viewer.role === "ADMIN") && (
             <>
-              {/* Employee's Letter Display */}
-              {hasEmployeeLetter && (
+              {/* Employee's Letter Display
+                  - If the complaint is OPEN, principals/admins must not see the
+                    current assignee letter; instead show the 3-dot wave animation.
+                  - Otherwise, show the letter when present (unchanged).
+              */}
+              {!isAssigned ? (
                 <Card>
-                  <h3 className="mb-3 text-sm font-semibold">מכתב המטפל/ת</h3>
-                  {isInProgress && (
-                    <div className="text-sm text-neutral-600 dark:text-neutral-400">
+                  <div className="flex items-center gap-3">
+                    <div className="inline-flex items-center gap-2">
+                      <span className="sr-only">Waiting for assignment</span>
                       <span className="dot-wave">.</span>
                       <span
                         className="dot-wave"
@@ -784,13 +828,96 @@ export default function ComplaintDetailPage() {
                         .
                       </span>
                     </div>
-                  )}
-                  {!isInProgress && (
-                    <p className="text-sm whitespace-pre-wrap leading-relaxed">
-                      {complaint.assigneeLetter?.body}
-                    </p>
-                  )}
+                    <div className="text-sm text-neutral-600 dark:text-neutral-400">
+                      מחכה להקצאה
+                    </div>
+                  </div>
                 </Card>
+              ) : displayStatus === "OPEN" ? (
+                <Card>
+                  <div className="flex items-center gap-3">
+                    <div className="inline-flex items-center gap-2">
+                      <span className="sr-only">In progress</span>
+                      <span className="dot-wave">.</span>
+                      <span
+                        className="dot-wave"
+                        style={{ animationDelay: "0.1s" }}
+                      >
+                        .
+                      </span>
+                      <span
+                        className="dot-wave"
+                        style={{ animationDelay: "0.2s" }}
+                      >
+                        .
+                      </span>
+                    </div>
+                    <div className="text-sm text-neutral-600 dark:text-neutral-400">
+                      הפנייה בתהליך
+                    </div>
+                  </div>
+                </Card>
+              ) : (
+                hasEmployeeLetter && (
+                  <Card>
+                    <div className="mb-3 flex items-start justify-between">
+                      <h3 className="text-sm font-semibold">מכתב המטפל/ת</h3>
+                      <div className="text-right text-xs text-neutral-500">
+                        <div className="font-medium">
+                          {assignee?.name ?? "—"}
+                        </div>
+                        <div className="mt-0.5 muted">
+                          {(complaint.assigneeLetter?.submittedAt ||
+                            complaint.assigneeLetter?.updatedAt ||
+                            "") && (
+                            <span>
+                              {new Date(
+                                complaint.assigneeLetter?.submittedAt ||
+                                  complaint.assigneeLetter?.updatedAt ||
+                                  ""
+                              ).toLocaleString("he-IL")}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {complaint.returnInfo && isInProgress && (
+                      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 mb-3">
+                        <div className="font-semibold">הוחזר לעריכה</div>
+                        <div className="mt-1 text-sm muted whitespace-pre-wrap">
+                          {complaint.returnInfo.reason}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="text-sm whitespace-pre-wrap leading-relaxed p-3 rounded-md border border-neutral-100 dark:border-neutral-800 bg-transparent">
+                      {complaint.assigneeLetter?.body}
+                    </div>
+
+                    {isInProgress && (
+                      <div className="mt-3 flex items-center gap-2 text-sm text-neutral-600 dark:text-neutral-400">
+                        <div className="inline-flex items-center gap-2">
+                          <span className="sr-only">In progress</span>
+                          <span className="dot-wave">.</span>
+                          <span
+                            className="dot-wave"
+                            style={{ animationDelay: "0.1s" }}
+                          >
+                            .
+                          </span>
+                          <span
+                            className="dot-wave"
+                            style={{ animationDelay: "0.2s" }}
+                          >
+                            .
+                          </span>
+                        </div>
+                        <div className="muted">הפנייה בטיפול אצל המטפל/ת</div>
+                      </div>
+                    )}
+                  </Card>
+                )
               )}
 
               {!hasEmployeeLetter &&
@@ -1018,11 +1145,7 @@ export default function ComplaintDetailPage() {
               ) : (
                 <div className="mt-1 text-sm">{dept?.name ?? "—"}</div>
               )}
-              {!canChangeDeptHere && (
-                <div className="mt-1 text-xs text-neutral-500">
-                  אין הרשאה לשנות מחלקה
-                </div>
-              )}
+              {/* permission hint removed: no message shown when user cannot change department */}
               {!hasDept && (
                 <div className="mt-1 text-xs text-amber-600 dark:text-amber-400">
                   יש לבחור מחלקה לפני שיוך מטפל/ת.
@@ -1060,11 +1183,10 @@ export default function ComplaintDetailPage() {
                   {assignee ? assignee.name : "—"}
                 </div>
               )}
-              {(!hasDept || !(canAssignHere && !isClosed)) && (
+              {/* show hint only when no department is selected */}
+              {!hasDept && (
                 <div className="mt-1 text-xs text-neutral-500">
-                  {!hasDept
-                    ? "בחר/י מחלקה כדי לשייך מטפל/ת"
-                    : "אין הרשאה לשייך מטפל/ת"}
+                  בחר/י מחלקה כדי לשייך מטפל/ת
                 </div>
               )}
             </div>
