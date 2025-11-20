@@ -67,12 +67,22 @@ export default function OpenComplaintsPage() {
   const [qDebounced, setQDebounced] = useState("");
   const [departmentId, setDepartmentId] = useState<string>("");
   const [assigneeUserId, setAssigneeUserId] = useState<string>("");
+  const [statusFilter, setStatusFilter] = useState<string>("");
+
+  const dedupedUsers = useMemo(() => {
+    const seen = new Set<string>();
+    return users.filter((u) => {
+      if (seen.has(u.id)) return false;
+      seen.add(u.id);
+      return true;
+    });
+  }, [users]);
 
   const userById = useMemo(() => {
     const m = new Map<string, User>();
-    for (const u of users) m.set(u.id, u);
+    for (const u of dedupedUsers) m.set(u.id, u);
     return m;
-  }, [users]);
+  }, [dedupedUsers]);
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -183,9 +193,25 @@ export default function OpenComplaintsPage() {
     if (assigneeUserId) {
       openish = openish.filter((c) => c.assigneeUserId === assigneeUserId);
     }
+    if (statusFilter) {
+      openish = openish.filter((c) => {
+        if (statusFilter === "UNASSIGNED") return !c.assigneeUserId;
+        if (statusFilter === "OPEN_ONLY") return c.status === "OPEN";
+        if (statusFilter === "AWAITING_REVIEW_ONLY")
+          return c.status === "AWAITING_PRINCIPAL_REVIEW";
+        return true;
+      });
+    }
 
     return openish;
-  }, [viewer, complaints, qDebounced, departmentId, assigneeUserId]);
+  }, [
+    viewer,
+    complaints,
+    qDebounced,
+    departmentId,
+    assigneeUserId,
+    statusFilter,
+  ]);
 
   const sorted = useMemo(() => {
     return [...filtered].sort((a, b) => {
@@ -259,7 +285,13 @@ export default function OpenComplaintsPage() {
       </div>
 
       {/* Filters */}
-      <div className="mb-4 grid gap-3 sm:grid-cols-3">
+      <div
+        className={`mb-4 grid gap-3 sm:grid-cols-3 ${
+          viewer.role === "ADMIN" || viewer.role === "PRINCIPAL"
+            ? "md:grid-cols-4"
+            : ""
+        }`}
+      >
         <input
           className="w-full rounded-md border px-3 py-2 text-sm dark:border-neutral-800 dark:bg-neutral-900"
           placeholder="חיפוש חופשי (כותרת/תוכן)"
@@ -284,12 +316,24 @@ export default function OpenComplaintsPage() {
           onChange={(e) => setAssigneeUserId(e.target.value)}
         >
           <option value="">כל המטפלים/ות</option>
-          {users.map((u) => (
+          {dedupedUsers.map((u) => (
             <option key={u.id} value={u.id}>
               {u.name}
             </option>
           ))}
         </select>
+        {(viewer.role === "ADMIN" || viewer.role === "PRINCIPAL") && (
+          <select
+            className="w-full rounded-md border px-2 py-2 text-sm dark:border-neutral-800 dark:bg-neutral-900"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+          >
+            <option value="">כל המצבים</option>
+            <option value="UNASSIGNED">פניות ללא הקצאה</option>
+            <option value="OPEN_ONLY">פניות פתוחות</option>
+            <option value="AWAITING_REVIEW_ONLY">ממתינות לאישור מנהל/ת</option>
+          </select>
+        )}
       </div>
 
       {sorted.length === 0 ? (

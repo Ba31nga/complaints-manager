@@ -21,11 +21,19 @@ export async function closeComplaintFlow(params: {
 
   const session = await getServerSession(authOptions);
   if (!session) return { error: "Unauthenticated", status: 401 } as const;
-  const role = (session.user as { role?: string } | undefined)?.role;
+  const sessionUser = session.user as { role?: string; id?: string } | undefined;
+  const role = sessionUser?.role;
+  const sessionUserId = sessionUser?.id;
   const isPrivileged = isRole(role, "PRINCIPAL") || isRole(role, "ADMIN");
   if (!isPrivileged) return { error: "Forbidden", status: 403 } as const;
 
-  if (existing.status !== "AWAITING_PRINCIPAL_REVIEW") {
+  const isAdminAssignee =
+    isRole(role, "ADMIN") &&
+    !!sessionUserId &&
+    !!existing.assigneeUserId &&
+    sessionUserId === existing.assigneeUserId;
+
+  if (existing.status !== "AWAITING_PRINCIPAL_REVIEW" && !isAdminAssignee) {
     return {
       error: "Cannot close: complaint is not awaiting principal review",
       status: 400,

@@ -41,6 +41,21 @@ export default function ClosedComplaintsPage() {
   const [departmentId, setDepartmentId] = useState<string>("");
   const [assigneeUserId, setAssigneeUserId] = useState<string>("");
 
+  const dedupedUsers = useMemo(() => {
+    const seen = new Set<string>();
+    return users.filter((u) => {
+      if (seen.has(u.id)) return false;
+      seen.add(u.id);
+      return true;
+    });
+  }, [users]);
+
+  const userById = useMemo(() => {
+    const m = new Map<string, User>();
+    for (const u of dedupedUsers) m.set(u.id, u);
+    return m;
+  }, [dedupedUsers]);
+
   const canSee = useMemo(() => {
     return viewer.role === "ADMIN" || viewer.role === "PRINCIPAL";
   }, [viewer.role]);
@@ -197,7 +212,7 @@ export default function ClosedComplaintsPage() {
           onChange={(e) => setAssigneeUserId(e.target.value)}
         >
           <option value="">כל המטפלים/ות</option>
-          {users.map((u) => (
+          {dedupedUsers.map((u) => (
             <option key={u.id} value={u.id}>
               {u.name}
             </option>
@@ -243,8 +258,7 @@ export default function ClosedComplaintsPage() {
                   <div>סטטוס: סגור</div>
                   <div>
                     {c.assigneeUserId
-                      ? users.find((u) => u.id === c.assigneeUserId)?.name ||
-                        "—"
+                      ? userById.get(c.assigneeUserId)?.name ?? "—"
                       : "—"}
                   </div>
                 </div>

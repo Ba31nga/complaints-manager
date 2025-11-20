@@ -330,6 +330,10 @@ export default function ComplaintDetailPage() {
     : null;
 
   const reporter = complaint.reporter;
+  const reporterDept =
+    reporter.type === "STAFF"
+      ? departments.find((d) => d.id === reporter.departmentId) ?? null
+      : null;
   const displayStatus = complaint.status;
 
   /* ───── Permissions ───── */
@@ -339,20 +343,31 @@ export default function ComplaintDetailPage() {
   const canChangeDeptHere = canChangeDepartment(viewer);
   const canWriteHere = canAssigneeWrite(viewer, effectiveAssigneeId);
   const canPrincipalHere = canPrincipalAct(viewer);
+  const isPrincipalOrAdmin =
+    viewer.role === "PRINCIPAL" || viewer.role === "ADMIN";
+  const isAdminAssignee =
+    viewer.role === "ADMIN" && viewer.userId === effectiveAssigneeId;
 
   const isAwaitingPrincipal = displayStatus === "AWAITING_PRINCIPAL_REVIEW";
   const isClosed = displayStatus === "CLOSED";
   const isInProgress =
     displayStatus === "IN_PROGRESS" || displayStatus === "ASSIGNED";
+  const adminFastTrack = isAdminAssignee && !isClosed;
 
   const hasEmployeeLetter =
     !!complaint.assigneeLetter?.body &&
     complaint.assigneeLetter.body.trim().length > 0;
 
   const canPrincipalRespond =
-    canPrincipalHere && isAwaitingPrincipal && hasEmployeeLetter;
+    (canPrincipalHere &&
+      isAwaitingPrincipal &&
+      hasEmployeeLetter &&
+      !isClosed) ||
+    adminFastTrack;
 
-  const nextHint = !hasDept
+  const nextHint = adminFastTrack
+    ? "כמנהל/ת מערכת שהפנייה הוקצתה אליך, ניתן לסגור אותה מיידית."
+    : !hasDept
     ? "יש לבחור מחלקה לפני התחלת הטיפול."
     : !isAssigned
     ? "יש לשייך מטפל/ת לפנייה לפני תחילת הטיפול."
@@ -492,6 +507,14 @@ export default function ComplaintDetailPage() {
     setActionLoading(true);
     setErr(null);
     try {
+      if (
+        adminFastTrack &&
+        displayStatus !== "AWAITING_PRINCIPAL_REVIEW"
+      ) {
+        await patchComplaint(complaint.id, {
+          status: "AWAITING_PRINCIPAL_REVIEW",
+        });
+      }
       await patchComplaint(complaint.id, {
         close: true,
         principalReview: {
@@ -802,101 +825,42 @@ export default function ComplaintDetailPage() {
           )}
 
           {/* PRINCIPAL / ADMIN REVIEW SECTION */}
-          {(viewer.role === "PRINCIPAL" || viewer.role === "ADMIN") && (
+          {isPrincipalOrAdmin && (
             <>
-              {/* Employee's Letter Display
+              {!adminFastTrack && (
+                <>
+                  {/* Employee's Letter Display
                   - If the complaint is OPEN, principals/admins must not see the
                     current assignee letter; instead show the 3-dot wave animation.
                   - Otherwise, show the letter when present (unchanged).
               */}
-              {!isAssigned ? (
-                <Card>
-                  <div className="flex items-center gap-3">
-                    <div className="inline-flex items-center gap-2">
-                      <span className="sr-only">Waiting for assignment</span>
-                      <span className="dot-wave">.</span>
-                      <span
-                        className="dot-wave"
-                        style={{ animationDelay: "0.1s" }}
-                      >
-                        .
-                      </span>
-                      <span
-                        className="dot-wave"
-                        style={{ animationDelay: "0.2s" }}
-                      >
-                        .
-                      </span>
-                    </div>
-                    <div className="text-sm text-neutral-600 dark:text-neutral-400">
-                      מחכה להקצאה
-                    </div>
-                  </div>
-                </Card>
-              ) : displayStatus === "OPEN" ? (
-                <Card>
-                  <div className="flex items-center gap-3">
-                    <div className="inline-flex items-center gap-2">
-                      <span className="sr-only">In progress</span>
-                      <span className="dot-wave">.</span>
-                      <span
-                        className="dot-wave"
-                        style={{ animationDelay: "0.1s" }}
-                      >
-                        .
-                      </span>
-                      <span
-                        className="dot-wave"
-                        style={{ animationDelay: "0.2s" }}
-                      >
-                        .
-                      </span>
-                    </div>
-                    <div className="text-sm text-neutral-600 dark:text-neutral-400">
-                      הפנייה בתהליך
-                    </div>
-                  </div>
-                </Card>
-              ) : (
-                hasEmployeeLetter && (
-                  <Card>
-                    <div className="mb-3 flex items-start justify-between">
-                      <h3 className="text-sm font-semibold">מכתב המטפל/ת</h3>
-                      <div className="text-right text-xs text-neutral-500">
-                        <div className="font-medium">
-                          {assignee?.name ?? "—"}
+                  {!isAssigned ? (
+                    <Card>
+                      <div className="flex items-center gap-3">
+                        <div className="inline-flex items-center gap-2">
+                          <span className="sr-only">Waiting for assignment</span>
+                          <span className="dot-wave">.</span>
+                          <span
+                            className="dot-wave"
+                            style={{ animationDelay: "0.1s" }}
+                          >
+                            .
+                          </span>
+                          <span
+                            className="dot-wave"
+                            style={{ animationDelay: "0.2s" }}
+                          >
+                            .
+                          </span>
                         </div>
-                        <div className="mt-0.5 muted">
-                          {(complaint.assigneeLetter?.submittedAt ||
-                            complaint.assigneeLetter?.updatedAt ||
-                            "") && (
-                            <span>
-                              {new Date(
-                                complaint.assigneeLetter?.submittedAt ||
-                                  complaint.assigneeLetter?.updatedAt ||
-                                  ""
-                              ).toLocaleString("he-IL")}
-                            </span>
-                          )}
+                        <div className="text-sm text-neutral-600 dark:text-neutral-400">
+                          מחכה להקצאה
                         </div>
                       </div>
-                    </div>
-
-                    {complaint.returnInfo && isInProgress && (
-                      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 mb-3">
-                        <div className="font-semibold">הוחזר לעריכה</div>
-                        <div className="mt-1 text-sm muted whitespace-pre-wrap">
-                          {complaint.returnInfo.reason}
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="text-sm whitespace-pre-wrap leading-relaxed p-3 rounded-md border border-neutral-100 dark:border-neutral-800 bg-transparent">
-                      {complaint.assigneeLetter?.body}
-                    </div>
-
-                    {isInProgress && (
-                      <div className="mt-3 flex items-center gap-2 text-sm text-neutral-600 dark:text-neutral-400">
+                    </Card>
+                  ) : displayStatus === "OPEN" ? (
+                    <Card>
+                      <div className="flex items-center gap-3">
                         <div className="inline-flex items-center gap-2">
                           <span className="sr-only">In progress</span>
                           <span className="dot-wave">.</span>
@@ -913,140 +877,216 @@ export default function ComplaintDetailPage() {
                             .
                           </span>
                         </div>
-                        <div className="muted">הפנייה בטיפול אצל המטפל/ת</div>
+                        <div className="text-sm text-neutral-600 dark:text-neutral-400">
+                          הפנייה בתהליך
+                        </div>
                       </div>
-                    )}
-                  </Card>
-                )
-              )}
+                    </Card>
+                  ) : (
+                    hasEmployeeLetter && (
+                      <Card>
+                        <div className="mb-3 flex items-start justify-between">
+                          <h3 className="text-sm font-semibold">מכתב המטפל/ת</h3>
+                          <div className="text-right text-xs text-neutral-500">
+                            <div className="font-medium">
+                              {assignee?.name ?? "—"}
+                            </div>
+                            <div className="mt-0.5 muted">
+                              {(complaint.assigneeLetter?.submittedAt ||
+                                complaint.assigneeLetter?.updatedAt ||
+                                "") && (
+                                <span>
+                                  {new Date(
+                                    complaint.assigneeLetter?.submittedAt ||
+                                      complaint.assigneeLetter?.updatedAt ||
+                                      ""
+                                  ).toLocaleString("he-IL")}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
 
-              {!hasEmployeeLetter &&
-                displayStatus === "AWAITING_PRINCIPAL_REVIEW" && (
-                  <Card>
-                    <div className="text-sm">
-                      אין מכתב מטפל/ת שמור. לא ניתן לאשר או להחזיר עד שהמטפל/ת
-                      יכתוב/תשמור מכתב.
-                    </div>
-                  </Card>
-                )}
+                        {complaint.returnInfo && isInProgress && (
+                          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 mb-3">
+                            <div className="font-semibold">הוחזר לעריכה</div>
+                            <div className="mt-1 text-sm muted whitespace-pre-wrap">
+                              {complaint.returnInfo.reason}
+                            </div>
+                          </div>
+                        )}
 
-              {/* Messages History Dropdown for Principal/Admin */}
-              {complaint.messages && complaint.messages.length > 0 && (
-                <Card>
-                  <button
-                    onClick={() => setMessagesExpanded(!messagesExpanded)}
-                    className="w-full flex items-center justify-between text-sm font-semibold hover:opacity-70 transition-opacity"
-                  >
-                    <span>היסטוריית הודעות ({complaint.messages.length})</span>
-                    <svg
-                      className={`w-4 h-4 transition-transform ${
-                        messagesExpanded ? "rotate-180" : ""
-                      }`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M19 14l-7 7m0 0l-7-7m7 7V3"
-                      />
-                    </svg>
-                  </button>
+                        <div className="text-sm whitespace-pre-wrap leading-relaxed p-3 rounded-md border border-neutral-100 dark:border-neutral-800 bg-transparent">
+                          {complaint.assigneeLetter?.body}
+                        </div>
 
-                  {messagesExpanded && (
-                    <div className="mt-3 space-y-2 max-h-96 overflow-y-auto">
-                      {complaint.messages.map((msg) => {
-                        const author = users.find((u) => u.id === msg.authorId);
-                        const isReturn = msg.body.startsWith("__RETURN__:");
-                        const returnReason = isReturn
-                          ? msg.body.slice("__RETURN__:".length)
-                          : null;
-
-                        return (
-                          <div
-                            key={msg.id}
-                            className={`rounded-lg p-3 text-sm border ${
-                              isReturn
-                                ? "bg-gray-100 border-gray-300 dark:bg-neutral-800/50 dark:border-neutral-700"
-                                : "bg-white border-gray-200 dark:bg-neutral-900 dark:border-neutral-700"
-                            }`}
-                          >
-                            <div className="flex justify-between items-start mb-2">
-                              <span className="font-medium">
-                                {author?.name || "לא ידוע"}
+                        {isInProgress && (
+                          <div className="mt-3 flex items-center gap-2 text-sm text-neutral-600 dark:text-neutral-400">
+                            <div className="inline-flex items-center gap-2">
+                              <span className="sr-only">In progress</span>
+                              <span className="dot-wave">.</span>
+                              <span
+                                className="dot-wave"
+                                style={{ animationDelay: "0.1s" }}
+                              >
+                                .
                               </span>
-                              <span className="text-xs muted">
-                                {new Date(msg.createdAt).toLocaleString(
-                                  "he-IL"
-                                )}
+                              <span
+                                className="dot-wave"
+                                style={{ animationDelay: "0.2s" }}
+                              >
+                                .
                               </span>
                             </div>
-                            {isReturn && (
-                              <div className="text-xs font-semibold mb-1 muted">
-                                החזרה לעריכה:
-                              </div>
-                            )}
-                            <p className="whitespace-pre-wrap">
-                              {isReturn ? returnReason : msg.body}
-                            </p>
+                            <div className="muted">
+                              הפנייה בטיפול אצל המטפל/ת
+                            </div>
                           </div>
-                        );
-                      })}
-                    </div>
+                        )}
+                      </Card>
+                    )
                   )}
-                </Card>
+
+                  {!hasEmployeeLetter &&
+                    displayStatus === "AWAITING_PRINCIPAL_REVIEW" && (
+                      <Card>
+                        <div className="text-sm">
+                          אין מכתב מטפל/ת שמור. לא ניתן לאשר או להחזיר עד
+                          שהמטפל/ת יכתוב/תשמור מכתב.
+                        </div>
+                      </Card>
+                    )}
+
+                  {/* Messages History Dropdown for Principal/Admin */}
+                  {complaint.messages && complaint.messages.length > 0 && (
+                    <Card>
+                      <button
+                        onClick={() => setMessagesExpanded(!messagesExpanded)}
+                        className="w-full flex items-center justify-between text-sm font-semibold hover:opacity-70 transition-opacity"
+                      >
+                        <span>
+                          היסטוריית הודעות ({complaint.messages.length})
+                        </span>
+                        <svg
+                          className={`w-4 h-4 transition-transform ${
+                            messagesExpanded ? "rotate-180" : ""
+                          }`}
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M19 14l-7 7m0 0l-7-7m7 7V3"
+                          />
+                        </svg>
+                      </button>
+
+                      {messagesExpanded && (
+                        <div className="mt-3 space-y-2 max-h-96 overflow-y-auto">
+                          {complaint.messages.map((msg) => {
+                            const author = users.find(
+                              (u) => u.id === msg.authorId
+                            );
+                            const isReturn =
+                              msg.body.startsWith("__RETURN__:");
+                            const returnReason = isReturn
+                              ? msg.body.slice("__RETURN__:".length)
+                              : null;
+
+                            return (
+                              <div
+                                key={msg.id}
+                                className={`rounded-lg p-3 text-sm border ${
+                                  isReturn
+                                    ? "bg-gray-100 border-gray-300 dark:bg-neutral-800/50 dark:border-neutral-700"
+                                    : "bg-white border-gray-200 dark:bg-neutral-900 dark:border-neutral-700"
+                                }`}
+                              >
+                                <div className="flex justify-between items-start mb-2">
+                                  <span className="font-medium">
+                                    {author?.name || "לא ידוע"}
+                                  </span>
+                                  <span className="text-xs muted">
+                                    {new Date(msg.createdAt).toLocaleString(
+                                      "he-IL"
+                                    )}
+                                  </span>
+                                </div>
+                                {isReturn && (
+                                  <div className="text-xs font-semibold mb-1 muted">
+                                    החזרה לעריכה:
+                                  </div>
+                                )}
+                                <p className="whitespace-pre-wrap">
+                                  {isReturn ? returnReason : msg.body}
+                                </p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </Card>
+                  )}
+
+                  {/* Return to Editor Section */}
+                  <Card>
+                    <div className="mb-3">
+                      <h4 className="text-sm font-semibold mb-2">
+                        החזרה לעריכה אצל המטפל/ת
+                      </h4>
+                      <p className="text-xs muted mb-3">
+                        בחר/י אפשרות זו אם ברצונך להחזיר את הפנייה למטפל/ת לעריכה
+                        נוספת
+                      </p>
+                    </div>
+
+                    <fieldset disabled={!canPrincipalRespond || isClosed}>
+                      <textarea
+                        className="w-full resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none dark:border-neutral-700 dark:bg-neutral-900 focus:ring-2 focus:ring-black dark:focus:ring-white"
+                        rows={3}
+                        placeholder="הסבר/הסבירי מדוע מוחזרת הפנייה לעריכה..."
+                        value={returnReason}
+                        onChange={(e) => setReturnReason(e.target.value)}
+                      />
+                      <div className="mt-2 flex justify-end">
+                        <button
+                          className={`btn-ghost ${
+                            actionLoading ||
+                            !returnReason.trim() ||
+                            !canPrincipalRespond
+                              ? "opacity-50 cursor-not-allowed"
+                              : ""
+                          }`}
+                          onClick={onPrincipalReturn}
+                          disabled={
+                            actionLoading ||
+                            !returnReason.trim() ||
+                            !canPrincipalRespond
+                          }
+                          type="button"
+                        >
+                          החזר לעריכה
+                        </button>
+                      </div>
+                    </fieldset>
+                  </Card>
+                </>
               )}
-
-              {/* Return to Editor Section */}
-              <Card>
-                <div className="mb-3">
-                  <h4 className="text-sm font-semibold mb-2">
-                    החזרה לעריכה אצל המטפל/ת
-                  </h4>
-                  <p className="text-xs muted mb-3">
-                    בחר/י אפשרות זו אם ברצונך להחזיר את הפנייה למטפל/ת לעריכה
-                    נוספת
-                  </p>
-                </div>
-
-                <fieldset disabled={!canPrincipalRespond || isClosed}>
-                  <textarea
-                    className="w-full resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none dark:border-neutral-700 dark:bg-neutral-900 focus:ring-2 focus:ring-black dark:focus:ring-white"
-                    rows={3}
-                    placeholder="הסבר/הסבירי מדוע מוחזרת הפנייה לעריכה..."
-                    value={returnReason}
-                    onChange={(e) => setReturnReason(e.target.value)}
-                  />
-                  <div className="mt-2 flex justify-end">
-                    <button
-                      className={`btn-ghost ${
-                        actionLoading ||
-                        !returnReason.trim() ||
-                        !canPrincipalRespond
-                          ? "opacity-50 cursor-not-allowed"
-                          : ""
-                      }`}
-                      onClick={onPrincipalReturn}
-                      disabled={
-                        actionLoading ||
-                        !returnReason.trim() ||
-                        !canPrincipalRespond
-                      }
-                      type="button"
-                    >
-                      החזר לעריכה
-                    </button>
-                  </div>
-                </fieldset>
-              </Card>
 
               {/* Decision & Summary Section */}
               <Card>
                 <h3 className="mb-4 text-sm font-semibold">
                   החלטת מנהל/ת בית הספר
                 </h3>
+                {adminFastTrack && (
+                  <div className="mb-4 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-900 dark:border-blue-900/40 dark:bg-blue-950/40 dark:text-blue-100">
+                    הפנייה הוקצתה אליך כמנהל/ת מערכת, ולכן ניתן לדלג על שלב
+                    האישור ולהגיע ישירות לסגירה.
+                  </div>
+                )}
 
                 <fieldset disabled={!canPrincipalRespond || isClosed}>
                   <div className="mb-4">
@@ -1224,6 +1264,18 @@ export default function ComplaintDetailPage() {
                     {reporter.email}
                   </a>
                 </div>
+              )}
+              {reporter.type === "STAFF" && (
+                <>
+                  <div>תפקיד: {reporter.jobTitle || "—"}</div>
+                  <div>מחלקה: {reporterDept?.name ?? reporter.departmentId ?? "—"}</div>
+                </>
+              )}
+              {reporter.type === "PARENT_STUDENT" && (
+                <>
+                  <div>שכבה: {reporter.grade || "—"}</div>
+                  <div>כיתה: {reporter.classNumber || "—"}</div>
+                </>
               )}
             </div>
           </section>
