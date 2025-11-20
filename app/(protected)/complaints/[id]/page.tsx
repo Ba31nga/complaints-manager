@@ -609,7 +609,7 @@ export default function ComplaintDetailPage() {
 
       {/* Stepper */}
       <div className="mb-6">
-        <ol className="flex items-center text-[11px] text-neutral-600 dark:text-neutral-400">
+        <ol className="flex flex-wrap items-center gap-2 text-[11px] text-neutral-600 dark:text-neutral-400">
           <li
             className={`flex items-center ${
               displayStatus === "ASSIGNED" ||
@@ -622,7 +622,7 @@ export default function ComplaintDetailPage() {
           >
             1. מכתב המטפל/ת
           </li>
-          <span className="mx-2 h-px w-10 bg-neutral-300 dark:bg-neutral-700" />
+          <span className="hidden h-px w-10 bg-neutral-300 dark:bg-neutral-700 sm:inline-block" />
           <li
             className={`flex items-center ${
               displayStatus === "AWAITING_PRINCIPAL_REVIEW" ||

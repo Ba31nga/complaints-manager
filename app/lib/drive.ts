@@ -8,7 +8,7 @@ const SA_KEY = SA_KEY_RAW && SA_KEY_RAW.includes("\\n")
   ? SA_KEY_RAW.replace(/\\n/g, "\n")
   : SA_KEY_RAW;
 
-export const DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
+export const DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID?.trim();
 
 let driveClient: drive_v3.Drive | null = null;
 
@@ -22,7 +22,7 @@ export function getDrive(): drive_v3.Drive {
   const auth = new google.auth.JWT({
     email: SA_EMAIL,
     key: SA_KEY,
-    scopes: ["https://www.googleapis.com/auth/drive.file"],
+    scopes: ["https://www.googleapis.com/auth/drive"],
   });
   driveClient = google.drive({ version: "v3", auth });
   return driveClient;

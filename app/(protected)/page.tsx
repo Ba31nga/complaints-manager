@@ -68,6 +68,8 @@ export default function OpenComplaintsPage() {
   const [departmentId, setDepartmentId] = useState<string>("");
   const [assigneeUserId, setAssigneeUserId] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<string>("");
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+  const [forceDesktopFilters, setForceDesktopFilters] = useState(false);
 
   const dedupedUsers = useMemo(() => {
     const seen = new Set<string>();
@@ -158,6 +160,27 @@ export default function OpenComplaintsPage() {
     const t = setTimeout(() => setQDebounced(q), 200);
     return () => clearTimeout(t);
   }, [q]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mql = window.matchMedia("(min-width: 640px)");
+    const handler = (event: MediaQueryListEvent) =>
+      setForceDesktopFilters(event.matches);
+    setForceDesktopFilters(mql.matches);
+    if (typeof mql.addEventListener === "function") {
+      mql.addEventListener("change", handler);
+      return () => mql.removeEventListener("change", handler);
+    }
+    // Fallback for Safari < 14
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
+    mql.addListener(handler);
+    return () => {
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore
+      mql.removeListener(handler);
+    };
+  }, []);
 
   // No need for local storage sync anymore as we only use NextAuth session
 
@@ -275,7 +298,7 @@ export default function OpenComplaintsPage() {
 
   return (
     <div className="p-4 container-max" dir="rtl">
-      <div className="mb-6 flex items-end justify-between gap-4">
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold">פניות פתוחות</h1>
           <p className="text-sm text-neutral-600 dark:text-neutral-400">
@@ -284,13 +307,41 @@ export default function OpenComplaintsPage() {
         </div>
       </div>
 
+      <div className="mb-3 flex items-center justify-between sm:hidden">
+        <button
+          onClick={() => setMobileFiltersOpen((prev) => !prev)}
+          className="inline-flex items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-medium text-neutral-700 shadow-sm hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:hover:bg-neutral-800"
+          aria-expanded={mobileFiltersOpen}
+          aria-controls="filters-panel"
+        >
+          {mobileFiltersOpen ? "הסתר סינונים" : "הצג סינונים"}
+          <span aria-hidden="true">{mobileFiltersOpen ? "˄" : "˅"}</span>
+        </button>
+        <span className="text-xs text-neutral-500">
+          {sorted.length} פניות תואמות
+        </span>
+      </div>
+
+      <div className="hidden text-xs text-neutral-500 sm:block">
+        {sorted.length} פניות תואמות לסינון הנוכחי
+      </div>
+
       {/* Filters */}
+      {/*
+        lg:grid-cols value determined by role – admins/principals get an extra column
+      */}
       <div
-        className={`mb-4 grid gap-3 sm:grid-cols-3 ${
+        id="filters-panel"
+        className={[
+          "mb-4 gap-3 transition-all duration-200",
+          forceDesktopFilters || mobileFiltersOpen
+            ? "grid"
+            : "hidden sm:grid",
+          "grid-cols-1 sm:grid-cols-2",
           viewer.role === "ADMIN" || viewer.role === "PRINCIPAL"
-            ? "md:grid-cols-4"
-            : ""
-        }`}
+            ? "lg:grid-cols-4"
+            : "lg:grid-cols-3",
+        ].join(" ")}
       >
         <input
           className="w-full rounded-md border px-3 py-2 text-sm dark:border-neutral-800 dark:bg-neutral-900"
@@ -341,7 +392,7 @@ export default function OpenComplaintsPage() {
           אין פניות תואמות.
         </p>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {sorted.map((c) => {
             const meta = urgencyMeta(c.createdAt);
             const left = daysLeft(c.createdAt);
@@ -364,7 +415,7 @@ export default function OpenComplaintsPage() {
               <Link
                 key={c.id}
                 href={`/complaints/${c.id}`}
-                aria-label={`פתח תלונה: ${c.title}`}
+                aria-label={`פתח פנייה: ${c.title}`}
               >
                 <Card className={cardClass}>
                   <div className="flex items-start justify-between gap-2">

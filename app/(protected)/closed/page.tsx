@@ -169,7 +169,7 @@ export default function ClosedComplaintsPage() {
     return (
       <div className="p-4" dir="rtl">
         <div className="rounded-xl border bg-white p-6 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
-          אין לך הרשאה לצפות בתלונות סגורות.
+          אין לך הרשאה לצפות בפניות סגורות.
         </div>
       </div>
     );
@@ -179,7 +179,7 @@ export default function ClosedComplaintsPage() {
     <div className="p-4 container-max" dir="rtl">
       <div className="mb-6">
         <div>
-          <h1 className="text-2xl font-semibold">תלונות סגורות</h1>
+          <h1 className="text-2xl font-semibold">פניות סגורות</h1>
           <p className="text-sm text-neutral-600 dark:text-neutral-400">
             חיפוש וסינון לפי מחלקה/מטפל/ת.
           </p>
@@ -228,7 +228,7 @@ export default function ClosedComplaintsPage() {
 
       {complaints.length === 0 ? (
         <p className="text-sm text-neutral-600 dark:text-neutral-400">
-          לא נמצאו תלונות סגורות תואמות.
+          לא נמצאו פניות סגורות תואמות.
         </p>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -236,7 +236,7 @@ export default function ClosedComplaintsPage() {
             <Link
               key={c.id}
               href={`/complaints/closed/${c.id}`}
-              aria-label={`פתח תלונה: ${c.title}`}
+              aria-label={`פתח פנייה: ${c.title}`}
             >
               <Card className="transition hover:shadow-md">
                 <div className="flex items-start justify-between gap-2">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useSession } from "next-auth/react";
 import type { Role } from "@/app/lib/types";
 
@@ -20,8 +20,13 @@ export default function TutorialFab({ position = "bottom-left" }: Props) {
   const [stepIdx, setStepIdx] = useState(0);
   const { data: session, status } = useSession();
 
-  const posClass =
-    position === "bottom-left" ? "left-4 bottom-4" : "right-4 bottom-4";
+  const cornerClass = position === "bottom-left" ? "left-4" : "right-4";
+  const buttonStyle: CSSProperties = {
+    bottom: "calc(1rem + env(safe-area-inset-bottom, 0px))",
+    ...(position === "bottom-left"
+      ? { left: "calc(1rem + env(safe-area-inset-left, 0px))" }
+      : { right: "calc(1rem + env(safe-area-inset-right, 0px))" }),
+  };
 
   // Resolve the user's role from their email when opening the tutorial
   useEffect(() => {
@@ -54,17 +59,17 @@ export default function TutorialFab({ position = "bottom-left" }: Props) {
       GENERIC: [
         {
           title: "סקירה כללית",
-          body: "ניהול תלונות: צפייה, סינון וטיפול. נווטו בין פתוחות, בטיפול וסגורות דרך הסרגל העליון.",
+          body: "ניהול פניות: צפייה, סינון וטיפול. נווטו בין פתוחות, בטיפול וסגורות דרך הסרגל העליון.",
           image: "/tutorial/generic-1.png",
         },
         {
-          title: "כרטיס תלונה",
-          body: "פתחו תלונה כדי לראות פרטים מלאים, תקשורת עם הפונה, סטטוס והיסטוריה.",
+          title: "כרטיס פנייה",
+          body: "פתחו פנייה כדי לראות פרטים מלאים, תקשורת עם הפונה, סטטוס והיסטוריה.",
           image: "/tutorial/generic-2.png",
         },
         {
           title: "סיום",
-          body: "לאחר פתרון, סגרו את התלונה וייצאו PDF לסיכום ודיווח לפי צורך.",
+          body: "לאחר פתרון, סגרו את הפנייה וייצאו PDF לסיכום ודיווח לפי צורך.",
           image: "/tutorial/generic-3.png",
         },
       ],
@@ -83,7 +88,7 @@ export default function TutorialFab({ position = "bottom-left" }: Props) {
       MANAGER: [
         {
           title: "ניהול מחלקה",
-          body: "שייכו תלונות לאנשי צוות, הגדירו תיעדוף ותאריכי יעד למחלקה שלכם.",
+          body: "שייכו פניות לאנשי צוות, הגדירו תיעדוף ותאריכי יעד למחלקה שלכם.",
           image: "/tutorial/manager-1.png",
         },
         {
@@ -95,7 +100,7 @@ export default function TutorialFab({ position = "bottom-left" }: Props) {
       EMPLOYEE: [
         {
           title: "קבלת משימות",
-          body: "טפלו בתלונות שהוקצו לכם, תקשרו עם הפונה ושמרו תיעוד מלא.",
+          body: "טפלו בפניות שהוקצו לכם, תקשרו עם הפונה ושמרו תיעוד מלא.",
           image: "/tutorial/employee-1.png",
         },
         {
@@ -135,10 +140,11 @@ export default function TutorialFab({ position = "bottom-left" }: Props) {
         type="button"
         aria-label="פתח הדרכה"
         onClick={() => setOpen(true)}
+        style={buttonStyle}
         className={[
           "fixed z-40",
-          posClass,
-          "h-12 w-12 rounded-full shadow-lg",
+          cornerClass,
+          "h-11 w-11 sm:h-12 sm:w-12 rounded-full shadow-lg",
           "bg-blue-600 text-white hover:bg-blue-500",
           "flex items-center justify-center",
           "focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400",
@@ -162,7 +168,7 @@ export default function TutorialFab({ position = "bottom-left" }: Props) {
             <div className="w-full max-w-2xl rounded-xl bg-white text-neutral-900 shadow-xl dark:bg-neutral-900 dark:text-neutral-100">
               <div className="flex items-center justify-between border-b border-neutral-200 p-4 dark:border-neutral-800">
                 <div className="flex items-center gap-2">
-                  <h2 className="text-lg font-semibold">הדרכה — מנהל תלונות</h2>
+                  <h2 className="text-lg font-semibold">הדרכה — מנהל פניות</h2>
                   <span className="text-xs opacity-70">
                     {role
                       ? `לתפקיד: ${role}`

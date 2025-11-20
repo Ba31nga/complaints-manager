@@ -56,6 +56,16 @@ export default function ClosedComplaintDetailPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  type LetterMeta = {
+    exists?: boolean;
+    fileName?: string;
+    modifiedTime?: string;
+    size?: number;
+  };
+  const [letterMeta, setLetterMeta] = useState<LetterMeta | null>(null);
+  const [letterStatus, setLetterStatus] = useState<
+    "idle" | "loading" | "ready" | "missing" | "error"
+  >("idle");
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -90,6 +100,43 @@ export default function ClosedComplaintDetailPage() {
       ctrl.abort();
     };
   }, [id, sessionStatus]);
+
+  useEffect(() => {
+    if (!complaint?.id) return;
+    let alive = true;
+    setLetterMeta(null);
+    setLetterStatus("loading");
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/complaints/${complaint.id}/letter?mode=meta`,
+          { cache: "no-store" }
+        );
+        if (!alive) return;
+        if (!res.ok) {
+          if (res.status === 404) {
+            setLetterStatus("missing");
+            return;
+          }
+          throw new Error(await res.text());
+        }
+        const json = (await res.json()) as { data?: LetterMeta };
+        if (!alive) return;
+        if (!json?.data?.exists) {
+          setLetterStatus("missing");
+          return;
+        }
+        setLetterMeta(json.data);
+        setLetterStatus("ready");
+      } catch (error) {
+        if (!alive) return;
+        setLetterStatus("error");
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [complaint?.id]);
 
   if (loading || sessionStatus === "loading") {
     return (
@@ -137,7 +184,7 @@ export default function ClosedComplaintDetailPage() {
         <div className="rounded-xl border bg-white p-8 text-center shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
           <div className="text-lg font-semibold mb-1">הפנייה לא נמצאה</div>
           <Link className="text-primary hover:underline" href="/closed">
-            ← חזרה לתלונות סגורות
+            ← חזרה לפניות סגורות
           </Link>
         </div>
       </div>
@@ -158,60 +205,135 @@ export default function ClosedComplaintDetailPage() {
       : justified
       ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300"
       : "bg-rose-100 text-rose-700 dark:bg-rose-900/20 dark:text-rose-300";
+  const usersById = new Map(users.map((u) => [u.id, u]));
+  const closureDateValue =
+    complaint.principalReview?.signedAt || complaint.updatedAt;
+  const closureDate = closureDateValue ? new Date(closureDateValue) : null;
+  const formatDateTime = (
+    value?: string | null,
+    options?: Intl.DateTimeFormatOptions
+  ) => {
+    if (!value) return "—";
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return "—";
+    return d.toLocaleString("he-IL", {
+      timeZone: "Asia/Jerusalem",
+      ...options,
+    });
+  };
+  const createdDate = new Date(complaint.createdAt);
+  const closureDateHuman = closureDateValue
+    ? formatDateTime(closureDateValue)
+    : "—";
+  const createdDateHuman = formatDateTime(complaint.createdAt);
+  const durationDays =
+    closureDate && createdDate
+      ? Math.max(
+          1,
+          Math.round(
+            (closureDate.getTime() - createdDate.getTime()) /
+              (1000 * 60 * 60 * 24)
+          )
+        )
+      : null;
+  const reporterTypeLabel =
+    reporter?.type === "STAFF"
+      ? "חבר/ת צוות"
+      : reporter?.type === "PARENT_STUDENT"
+      ? "הורה / תלמיד"
+      : "—";
+  const letterViewerUrl = complaint
+    ? `/api/complaints/${complaint.id}/letter`
+    : null;
+  const principalSigner = complaint.principalReview?.signedByUserId
+    ? usersById.get(complaint.principalReview.signedByUserId) || null
+    : null;
+  const principalSignedAtHuman = formatDateTime(
+    complaint.principalReview?.signedAt
+  );
+  const messageTimeline = [...(complaint.messages ?? [])].sort(
+    (a, b) =>
+      new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+  );
+  const resolveAuthorName = (authorId: string) => {
+    if (!authorId) return "לא מזוהה";
+    return usersById.get(authorId)?.name || authorId;
+  };
 
   return (
     <div className="p-4 md:p-6 container-max" dir="rtl">
       {/* Top summary card */}
       <div className="mb-6 rounded-2xl border bg-white p-5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0 space-y-3">
             <div className="text-xs text-neutral-500">
               <Link href="/closed" className="hover:underline">
-                תלונות סגורות
+                פניות סגורות
               </Link>{" "}
               /{" "}
               <span className="text-neutral-700 dark:text-neutral-300">
-                פרטי פנייה
+                דף למידה
               </span>
             </div>
-            <h1 className="mt-1 text-2xl font-semibold truncate">
-              {complaint.title}
-            </h1>
-            <div className="mt-2 grid gap-2 text-xs text-neutral-600 dark:text-neutral-400 sm:grid-cols-4">
-              <div className="inline-flex items-center gap-2">
-                <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] dark:bg-neutral-800">
-                  סגור
-                </span>
-                {justified !== null && (
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-[11px] ${decisionColor}`}
-                  >
-                    {justified ? "מוצדקת" : "לא מוצדקת"}
+            <div className="space-y-1">
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                פנייה #{complaint.id}
+              </p>
+              <h1 className="text-2xl font-semibold leading-snug text-neutral-900 dark:text-white">
+                {complaint.title}
+              </h1>
+              <p className="text-sm text-neutral-600 dark:text-neutral-400">
+                {complaint.subject}
+              </p>
+            </div>
+            <div className="grid gap-3 text-sm text-neutral-600 dark:text-neutral-400 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="space-y-1 rounded-xl bg-neutral-50 p-3 text-xs dark:bg-neutral-800/60">
+                <div className="text-neutral-500 dark:text-neutral-400">
+                  סטטוס
+                </div>
+                <div className="inline-flex flex-wrap items-center gap-2">
+                  <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] font-medium dark:bg-neutral-700">
+                    סגור
                   </span>
-                )}
+                  {justified !== null && (
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${decisionColor}`}
+                    >
+                      {justified ? "מוצדקת" : "לא מוצדקת"}
+                    </span>
+                  )}
+                </div>
               </div>
-              <div>
-                מחלקה: <span className="font-medium">{dept?.name || "—"}</span>
+              <div className="space-y-1 rounded-xl bg-neutral-50 p-3 text-xs dark:bg-neutral-800/60">
+                <div className="text-neutral-500 dark:text-neutral-400">
+                  מחלקה מובילה
+                </div>
+                <div className="text-sm font-semibold text-neutral-800 dark:text-neutral-100">
+                  {dept?.name || "—"}
+                </div>
               </div>
-              <div>
-                מטפל/ת:{" "}
-                <span className="font-medium">{assignee?.name || "—"}</span>
+              <div className="space-y-1 rounded-xl bg-neutral-50 p-3 text-xs dark:bg-neutral-800/60">
+                <div className="text-neutral-500 dark:text-neutral-400">
+                  משך טיפול
+                </div>
+                <div className="text-sm font-semibold text-neutral-800 dark:text-neutral-100">
+                  {durationDays ? `${durationDays} ימים` : "—"}
+                </div>
               </div>
-              <div>
-                נסגר בתאריך:{" "}
-                <span className="font-medium">
-                  {new Date(
-                    complaint.principalReview?.signedAt || complaint.updatedAt
-                  ).toLocaleString("he-IL", { timeZone: "Asia/Jerusalem" })}
-                </span>
+              <div className="space-y-1 rounded-xl bg-neutral-50 p-3 text-xs dark:bg-neutral-800/60">
+                <div className="text-neutral-500 dark:text-neutral-400">
+                  תאריך סגירה
+                </div>
+                <div className="text-sm font-semibold text-neutral-800 dark:text-neutral-100">
+                  {closureDateHuman}
+                </div>
               </div>
             </div>
           </div>
           <div className="text-xs text-neutral-600 dark:text-neutral-400">
-            נוצר:{" "}
-            {new Date(complaint.createdAt).toLocaleDateString("he-IL", {
-              timeZone: "Asia/Jerusalem",
-            })}
+            <div>נוצר: {createdDateHuman}</div>
+            <div>עודכן: {closureDateHuman}</div>
+            <div>מטפל/ת מוביל/ה: {assignee?.name || "—"}</div>
           </div>
         </div>
       </div>
@@ -220,49 +342,210 @@ export default function ClosedComplaintDetailPage() {
         {/* Main column */}
         <div className="space-y-4">
           <Card>
-            <h3 className="mb-2 text-sm font-semibold">
-              סיכום מנהל/ת בית הספר
-            </h3>
-            {complaint.principalReview ? (
-              <div className="space-y-2 text-sm">
-                <div
-                  className={`inline-flex items-center gap-2 ${decisionColor} rounded-full px-2 py-0.5 text-[11px]`}
+            <h3 className="mb-2 text-sm font-semibold">תיאור האירוע המקורי</h3>
+            <p className="whitespace-pre-wrap text-sm leading-6 text-neutral-800 dark:text-neutral-200">
+              {complaint.body}
+            </p>
+          </Card>
+
+          <Card>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold">תובנות עיקריות ללמידה</h3>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                  מיפוי מהיר של ההכרעה והגורמים שהובילו אליה
+                </p>
+              </div>
+              {justified !== null && (
+                <span
+                  className={`rounded-full px-3 py-1 text-[12px] font-medium ${decisionColor}`}
                 >
-                  {complaint.principalReview.justified ? "מוצדקת" : "לא מוצדקת"}
+                  {justified ? "הפנייה נמצאה מוצדקת" : "הפנייה לא נמצאה מוצדקת"}
+                </span>
+              )}
+            </div>
+            <div className="mt-4 grid gap-4 text-sm sm:grid-cols-2">
+              <div className="rounded-xl bg-neutral-50 p-3 dark:bg-neutral-800/50">
+                <div className="text-xs text-neutral-500 dark:text-neutral-400">
+                  גורם מטפל מרכזי
                 </div>
-                <div className="whitespace-pre-wrap leading-6 text-neutral-800 dark:text-neutral-200">
-                  {complaint.principalReview.summary}
+                <div className="text-neutral-900 dark:text-neutral-50">
+                  {assignee?.name || "—"}
                 </div>
               </div>
+              <div className="rounded-xl bg-neutral-50 p-3 dark:bg-neutral-800/50">
+                <div className="text-xs text-neutral-500 dark:text-neutral-400">
+                  מקור הדיווח
+                </div>
+                <div className="text-neutral-900 dark:text-neutral-50">
+                  {reporterTypeLabel}
+                </div>
+              </div>
+              <div className="rounded-xl bg-neutral-50 p-3 dark:bg-neutral-800/50">
+                <div className="text-xs text-neutral-500 dark:text-neutral-400">
+                  חזרות לטיפול
+                </div>
+                <div className="text-neutral-900 dark:text-neutral-50">
+                  {complaint.returnInfo?.count
+                    ? `${complaint.returnInfo.count} פעמים`
+                    : "לא חזר לביצוע"}
+                </div>
+              </div>
+              <div className="rounded-xl bg-neutral-50 p-3 dark:bg-neutral-800/50">
+                <div className="text-xs text-neutral-500 dark:text-neutral-400">
+                  מזהה מתעדכן
+                </div>
+                <div className="text-neutral-900 dark:text-neutral-50">
+                  {complaint.id}
+                </div>
+              </div>
+            </div>
+          </Card>
+
+          <Card>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold">מכתב רשמי למשפחה</h3>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                  נוסח החתימה של מנהל/ת בית הספר שנשלח למשפחה
+                </p>
+              </div>
+              {complaint.principalReview && (
+                <div className="text-xs text-neutral-500 dark:text-neutral-400 text-left">
+                  <div>נחתם ע"י {principalSigner?.name || "—"}</div>
+                  <div>בתאריך {principalSignedAtHuman}</div>
+                </div>
+              )}
+            </div>
+            {complaint.principalReview ? (
+              <div className="mt-3 rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm leading-6 text-neutral-800 shadow-sm dark:border-neutral-800 dark:bg-neutral-900/60 dark:text-neutral-100">
+                <p className="whitespace-pre-wrap">
+                  {complaint.principalReview.summary}
+                </p>
+              </div>
             ) : (
-              <div className="text-sm text-neutral-600 dark:text-neutral-400">
-                —
+              <div className="mt-3 rounded-xl border border-dashed p-4 text-sm text-neutral-500">
+                טרם הוזן מכתב חתום למקרה זה.
+              </div>
+            )}
+            <div className="mt-4">
+              {letterStatus === "ready" && letterViewerUrl ? (
+                <div className="rounded-xl border bg-neutral-50 p-2 dark:border-neutral-800 dark:bg-neutral-900/60">
+                  <object
+                    data={letterViewerUrl}
+                    type="application/pdf"
+                    className="h-[420px] w-full rounded-lg border border-neutral-200 shadow-sm dark:border-neutral-800"
+                  >
+                    <p className="p-4 text-sm">
+                      לא ניתן להציג את המסמך בדפדפן.{" "}
+                      <a
+                        href={letterViewerUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-primary underline"
+                      >
+                        לחצו כאן להורדה
+                      </a>
+                      .
+                    </p>
+                  </object>
+                  <div className="mt-3 text-xs text-neutral-500 dark:text-neutral-400">
+                    <a
+                      href={letterViewerUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-primary hover:underline"
+                    >
+                      הורדת המכתב כ-PDF
+                    </a>
+                    {letterMeta?.size
+                      ? ` · ${Math.round(letterMeta.size / 1024)}KB`
+                      : ""}
+                  </div>
+                </div>
+              ) : letterStatus === "loading" ? (
+                <div className="rounded-xl border border-dashed p-6 text-sm text-neutral-500 dark:border-neutral-700 dark:text-neutral-400">
+                  טוען מסמך חתום…
+                </div>
+              ) : letterStatus === "missing" ? (
+                <div className="rounded-xl border border-dashed p-6 text-sm text-neutral-500 dark:border-neutral-700 dark:text-neutral-400">
+                  לא נמצא מסמך PDF בתיקייה הייעודית. ודאו שהופיע קובץ בשם{" "}
+                  <span className="font-medium">{complaint.id}.pdf</span> בתיקיית
+                  הדרייב המוגדרת.
+                </div>
+              ) : (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-200">
+                  אירעה שגיאה בטעינת המכתב מן הדרייב. נסו לרענן את הדף או פנו
+                  לתמיכה.
+                </div>
+              )}
+            </div>
+          </Card>
+
+          <Card>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold">היסטוריית תקשורת</h3>
+              <span className="text-xs text-neutral-500 dark:text-neutral-400">
+                {messageTimeline.length} הודעות
+              </span>
+            </div>
+            {messageTimeline.length ? (
+              <ol className="mt-4 space-y-3">
+                {messageTimeline.map((msg) => (
+                  <li
+                    key={msg.id}
+                    className="rounded-xl border bg-white p-4 shadow-sm dark:border-neutral-800 dark:bg-neutral-900/60"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+                      <span className="font-medium text-neutral-800 dark:text-neutral-100">
+                        {resolveAuthorName(msg.authorId)}
+                      </span>
+                      <span>{formatDateTime(msg.createdAt)}</span>
+                    </div>
+                    <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-neutral-800 dark:text-neutral-100">
+                      {msg.body}
+                    </p>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <div className="mt-4 rounded-xl border border-dashed p-4 text-sm text-neutral-500 dark:border-neutral-700 dark:text-neutral-400">
+                אין הודעות תיעוד למקרה זה.
               </div>
             )}
           </Card>
 
           <Card>
-            <h3 className="mb-2 text-sm font-semibold">מכתב המטפל/ת</h3>
-            <div className="text-sm whitespace-pre-wrap leading-6 text-neutral-800 dark:text-neutral-200">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold">טיוטת מטפל/ת (פנימי)</h3>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                  טקסט שהמטפל/ת הכין/ה לצורך תהליך הסגירה
+                </p>
+              </div>
+              {complaint.assigneeLetter?.submittedAt && (
+                <span className="text-xs text-neutral-500 dark:text-neutral-400">
+                  עודכן {formatDateTime(complaint.assigneeLetter.submittedAt)}
+                </span>
+              )}
+            </div>
+            <div className="mt-2 whitespace-pre-wrap text-sm leading-6 text-neutral-800 dark:text-neutral-200">
               {complaint.assigneeLetter?.body || "—"}
             </div>
-          </Card>
-
-          <Card>
-            <h3 className="mb-2 text-sm font-semibold">פרטי הפנייה</h3>
-            <p className="whitespace-pre-wrap text-sm leading-6 text-neutral-800 dark:text-neutral-200">
-              {complaint.body}
-            </p>
           </Card>
         </div>
 
         {/* Side column */}
-        <aside className="space-y-4 lg:sticky lg:top-20 h-fit">
-          {/* Reporter details */}
+        <aside className="h-fit space-y-4 lg:sticky lg:top-20">
           <section className="rounded-xl border bg-white p-5 text-sm shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
-            <h4 className="mb-3 text-sm font-semibold">פרטי המדווח</h4>
-            <div className="space-y-1 text-neutral-800 dark:text-neutral-200">
-              <div className="font-medium">{reporter?.fullName || "—"}</div>
+            <h4 className="mb-3 text-sm font-semibold">פרטי המדווח/ת</h4>
+            <div className="space-y-2 text-neutral-800 dark:text-neutral-200">
+              <div className="text-base font-medium">
+                {reporter?.fullName || "—"}
+              </div>
+              <div className="text-xs text-neutral-500 dark:text-neutral-400">
+                {reporterTypeLabel}
+              </div>
               {reporter?.phone && (
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-neutral-500">טלפון</span>
@@ -293,7 +576,7 @@ export default function ClosedComplaintDetailPage() {
             <ul className="space-y-1">
               <li>
                 <Link className="text-primary hover:underline" href="/closed">
-                  ← חזרה לתלונות סגורות
+                  ← חזרה לפניות סגורות
                 </Link>
               </li>
             </ul>
