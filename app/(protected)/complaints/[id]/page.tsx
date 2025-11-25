@@ -330,6 +330,14 @@ export default function ComplaintDetailPage() {
     : null;
 
   const reporter = complaint.reporter;
+  const reporterTypeLabel =
+    reporter.type === "STAFF"
+      ? "חבר/ת צוות"
+      : reporter.type === "PARENT_STUDENT"
+      ? "הורה / תלמיד"
+      : reporter.type === "BISLAT"
+      ? 'ביסל"ט'
+      : "—";
   const reporterDept =
     reporter.type === "STAFF"
       ? departments.find((d) => d.id === reporter.departmentId) ?? null
@@ -1243,6 +1251,11 @@ export default function ComplaintDetailPage() {
             <h4 className="mb-3 text-sm font-semibold">פרטי המדווח</h4>
             <div className="text-sm text-neutral-800 dark:text-neutral-200 space-y-1">
               <div className="font-medium">{reporter.fullName}</div>
+              <div className="inline-flex items-center gap-2 text-xs text-neutral-500">
+                <span className="rounded-full bg-neutral-100 px-2 py-0.5 dark:bg-neutral-800">
+                  {reporterTypeLabel}
+                </span>
+              </div>
               {reporter.phone && (
                 <div>
                   טלפון:
@@ -1275,6 +1288,12 @@ export default function ComplaintDetailPage() {
                 <>
                   <div>שכבה: {reporter.grade || "—"}</div>
                   <div>כיתה: {reporter.classNumber || "—"}</div>
+                </>
+              )}
+              {reporter.type === "BISLAT" && (
+                <>
+                  <div>תפקיד: {reporter.jobTitle || "—"}</div>
+                  <div>גף: {reporter.flight || "—"}</div>
                 </>
               )}
             </div>

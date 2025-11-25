@@ -241,6 +241,8 @@ export default function ClosedComplaintDetailPage() {
       ? "חבר/ת צוות"
       : reporter?.type === "PARENT_STUDENT"
       ? "הורה / תלמיד"
+      : reporter?.type === "BISLAT"
+      ? 'ביסל"ט'
       : "—";
   const letterViewerUrl = complaint
     ? `/api/complaints/${complaint.id}/letter`
@@ -566,6 +568,15 @@ export default function ClosedComplaintDetailPage() {
                   >
                     {reporter.email}
                   </a>
+                </div>
+              )}
+              {reporter?.type === "BISLAT" && (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-neutral-500">תפקיד / גף</span>
+                  <span>
+                    {(reporter.jobTitle || "—") +
+                      (reporter.flight ? ` · ${reporter.flight}` : "")}
+                  </span>
                 </div>
               )}
             </div>

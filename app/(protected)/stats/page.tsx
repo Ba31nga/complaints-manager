@@ -511,19 +511,24 @@ export default function StatsPage() {
   }, [complaints, userById]);
 
   const reporterStats = useMemo(() => {
-    const byType = {
+    const byType: Record<
+      "STAFF" | "PARENT_STUDENT" | "BISLAT",
+      { label: string; count: number; share: number }
+    > = {
       STAFF: { label: "צוות בית הספר", count: 0, share: 0 },
       PARENT_STUDENT: { label: "הורים/תלמידים", count: 0, share: 0 },
+      BISLAT: { label: 'ביסל"ט', count: 0, share: 0 },
     };
+    type ReporterStatKey = keyof typeof byType;
     const origins = new Map<
       string,
-      { label: string; count: number; type: "STAFF" | "PARENT_STUDENT" }
+      { label: string; count: number; type: ReporterStatKey }
     >();
     for (const complaint of complaints) {
       const reporter = complaint.reporter;
       if (!reporter) continue;
-      const typeKey =
-        reporter.type === "STAFF" ? "STAFF" : "PARENT_STUDENT";
+      const typeKey = (reporter.type || "PARENT_STUDENT") as ReporterStatKey;
+      if (!byType[typeKey]) continue;
       byType[typeKey].count += 1;
 
       let label = "";
@@ -532,11 +537,13 @@ export default function StatsPage() {
           departmentById.get(reporter.departmentId)?.name ||
           reporter.jobTitle ||
           "צוות אחר";
-      } else {
+      } else if (reporter.type === "PARENT_STUDENT") {
         const grade = reporter.grade ? `כיתה ${reporter.grade}` : "";
         const klass = reporter.classNumber ? `-${reporter.classNumber}` : "";
         const combined = `${grade}${klass}`.replace(/^-/, "").trim();
         label = combined || "קהילת הורים/תלמידים";
+      } else if (reporter.type === "BISLAT") {
+        label = reporter.flight || reporter.jobTitle || 'ביסל"ט';
       }
       const key = `${reporter.type}:${label}`;
       if (origins.has(key)) {
@@ -547,8 +554,9 @@ export default function StatsPage() {
     }
 
     const total = complaints.length || 1;
-    byType.STAFF.share = byType.STAFF.count / total;
-    byType.PARENT_STUDENT.share = byType.PARENT_STUDENT.count / total;
+    (Object.keys(byType) as ReporterStatKey[]).forEach((key) => {
+      byType[key].share = byType[key].count / total;
+    });
 
     const topOrigins = [...origins.values()]
       .sort((a, b) => b.count - a.count)
@@ -561,7 +569,7 @@ export default function StatsPage() {
       }));
 
     return {
-      byType: [byType.STAFF, byType.PARENT_STUDENT],
+      byType: Object.values(byType),
       topOrigins,
     };
   }, [complaints, departmentById]);

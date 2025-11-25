@@ -12,7 +12,8 @@ import type {
  * A:id B:createdAt C:updatedAt D:subject E:title F:body G:status H:departmentId
  * I:assigneeUserId J:createdById K:reporterType L:reporterFullName M:reporterEmail N:reporterPhone
  * O:reporterJobTitle P:reporterDepartmentId Q:reporterGrade R:reporterClassNumber
- * S:messagesJSON T:assigneeLetterJSON U:returnInfoJSON V:reviewCyclesJSON W:principalReviewJSON X:notificationEmailJSON
+ * S:messagesJSON T:assigneeLetterJSON U:returnInfoJSON V:reviewCyclesJSON W:principalReviewJSON
+ * X:notificationEmailJSON Y:reporterFlight
  */
 export const COMPLAINTS_HEADER_AR = [
   "id",
@@ -39,6 +40,7 @@ export const COMPLAINTS_HEADER_AR = [
   "reviewCyclesJSON",
   "principalReviewJSON",
   "notificationEmailJSON",
+  "reporterFlight",
 ] as const;
 
 // ✅ Important: DO NOT put an optional param before a required one.
@@ -65,18 +67,27 @@ export function rowToComplaint(row: string[]): Complaint | null {
   const reporterType = (cells[10] ||
     "PARENT_STUDENT") as Complaint["reporter"]["type"];
 
-  const reporter =
+  const reporter: Complaint["reporter"] =
     reporterType === "STAFF"
       ? {
-          type: "STAFF" as const,
+          type: "STAFF",
           fullName: cells[11] || "",
           email: cells[12] || "",
           phone: cells[13] || "",
           jobTitle: cells[14] || "",
           departmentId: cells[15] || "",
         }
+      : reporterType === "BISLAT"
+      ? {
+          type: "BISLAT",
+          fullName: cells[11] || "",
+          email: cells[12] || "",
+          phone: cells[13] || "",
+          jobTitle: cells[14] || "",
+          flight: cells[24] || "",
+        }
       : {
-          type: "PARENT_STUDENT" as const,
+          type: "PARENT_STUDENT",
           fullName: cells[11] || "",
           email: cells[12] || "",
           phone: cells[13] || "",
@@ -150,13 +161,17 @@ export function complaintToRow(c: Complaint): (string | number | boolean)[] {
   let reporterDepartmentId = "";
   let reporterGrade = "";
   let reporterClassNumber = "";
+  let reporterFlight = "";
 
   if (c.reporter.type === "STAFF") {
     reporterJobTitle = c.reporter.jobTitle;
     reporterDepartmentId = c.reporter.departmentId;
-  } else {
+  } else if (c.reporter.type === "PARENT_STUDENT") {
     reporterGrade = c.reporter.grade;
     reporterClassNumber = c.reporter.classNumber;
+  } else if (c.reporter.type === "BISLAT") {
+    reporterJobTitle = c.reporter.jobTitle;
+    reporterFlight = c.reporter.flight;
   }
 
   return [
@@ -187,5 +202,6 @@ export function complaintToRow(c: Complaint): (string | number | boolean)[] {
     c.reviewCycles ? JSON.stringify(c.reviewCycles) : "",
     c.principalReview ? JSON.stringify(c.principalReview) : "",
     c.notificationEmail ? JSON.stringify(c.notificationEmail) : "",
+    reporterFlight,
   ];
 }

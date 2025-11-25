@@ -65,6 +65,14 @@ export type Reporter =
       phone: string;
       grade: string;
       classNumber: string;
+    }
+  | {
+      type: "BISLAT";
+      fullName: string;
+      email: string;
+      phone: string;
+      jobTitle: string;
+      flight: string;
     };
 
 export type AssigneeLetter = {
